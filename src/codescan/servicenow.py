@@ -12,6 +12,7 @@ stay closed (see the sticky states in `validation.py`).
 
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 
@@ -104,11 +105,31 @@ class ServiceNowExporter:
         out_path: str | Path,
     ) -> list[dict]:
         items = self.build(findings, chains)
-        Path(out_path).write_text(json.dumps({"records": items}, indent=2), encoding="utf-8")
+
+        if (self.cfg.format or "json").lower() == "csv":
+            # ServiceNow Import Sets accept CSV; write alongside as .csv.
+            self._write_csv(items, Path(out_path).with_suffix(".csv"))
+        else:
+            Path(out_path).write_text(
+                json.dumps({"records": items}, indent=2), encoding="utf-8")
 
         if self.cfg.push:
             self._push(items)
         return items
+
+    @staticmethod
+    def _write_csv(items: list[dict], path: Path) -> None:
+        if not items:
+            path.write_text("", encoding="utf-8")
+            return
+        # Every record shares the same keys (built by to_vulnerable_item).
+        fieldnames = list(items[0].keys())
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            for item in items:
+                # csv quotes multi-line work_notes; normalize None -> "".
+                writer.writerow({k: ("" if v is None else v) for k, v in item.items()})
 
     def _push(self, items: list[dict]) -> None:
         """POST each record into the configured import table (Table API)."""

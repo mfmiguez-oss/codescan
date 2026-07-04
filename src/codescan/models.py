@@ -111,6 +111,8 @@ class Exploitability(BaseModel):
     epss: float | None = None             # FIRST EPSS probability 0-1
     rationale: str = ""
     chain_ids: list[str] = Field(default_factory=list)
+    threat_ids: list[str] = Field(default_factory=list)   # threats citing this finding
+    threat_signal: float = 0.0                            # 0-100, from linked threats
 
 
 class Finding(BaseModel):

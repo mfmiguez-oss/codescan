@@ -73,7 +73,7 @@ def main() -> None:
     box(ax, 636, 262, 270, 58, "Enrich (pluggable)", "KEV · EPSS · reach · AI", NEUTRAL)
     # row B
     box(ax, 64, 352, 270, 58, "Exploitability + chaining", "AI · Opus 4.8 / Fable 5", AI)
-    box(ax, 350, 352, 270, 58, "Composite score", "severity·exploit·exposure·chain", NEUTRAL)
+    box(ax, 350, 352, 270, 58, "Composite score", "sev·exploit·exposure·chain·threat", NEUTRAL)
     box(ax, 636, 352, 270, 58, "Validation states", "proposed · analyst-confirmed", NEUTRAL)
 
     arrow(ax, (199, 238), (199, 262))
@@ -87,18 +87,20 @@ def main() -> None:
 
     # outputs
     label(40, 480, "OUTPUTS")
-    box(ax, 250, 490, 250, 58, "ServiceNow VR export", "idempotent vulnerable items", IO)
-    box(ax, 560, 490, 200, 58, "Web UI / API", "analyst triage", IO)
-    box(ax, 800, 490, 150, 58, "State store", "sticky decisions", NEUTRAL)
+    box(ax, 70, 490, 190, 58, "ServiceNow VR", "JSON / CSV · idempotent", IO)
+    box(ax, 285, 490, 140, 58, "Web UI / API", "analyst triage", IO)
+    box(ax, 445, 490, 135, 58, "State store", "sticky decisions", NEUTRAL)
+    box(ax, 690, 490, 220, 58, "Threat models", "STRIDE · per-service (AI)", AI)
 
-    arrow(ax, (700, 410), (430, 488))
-    arrow(ax, (745, 410), (665, 488))
-    # feedback loop
-    arrow(ax, (760, 515), (800, 515), color=BLUE, dashed=True)
-    ax.plot([875, 875, 805], [490, 430, 414], color=BLUE, linewidth=1.8,
+    arrow(ax, (730, 410), (170, 488))    # -> ServiceNow
+    arrow(ax, (752, 410), (350, 488))    # -> Web UI
+    arrow(ax, (788, 410), (800, 488))    # -> Threat models (AI)
+    # sticky feedback loop: Web UI -> state store -> validation
+    arrow(ax, (425, 517), (445, 517), color=BLUE, dashed=True)
+    ax.plot([512, 512, 700], [490, 442, 414], color=BLUE, linewidth=1.8,
             linestyle=(0, (5, 4)), zorder=1)
-    arrow(ax, (815, 417), (800, 412), color=BLUE, dashed=True)
-    ax.text(792, 468, "state changes", fontsize=9, color=BLUE)
+    arrow(ax, (690, 416), (702, 412), color=BLUE, dashed=True)
+    ax.text(520, 470, "state changes", fontsize=9, color=BLUE)
 
     # legend
     ax.add_patch(FancyBboxPatch((40, 600), 16, 16, boxstyle="round,pad=0,rounding_size=3",

@@ -103,7 +103,7 @@ ServiceNow-ready output on its own.
 |---|---|---|
 | Connectors | `connectors/` | Talk to external systems; emit/consume raw scanner shapes. |
 | Domain model | `models.py` | Canonical `Finding`, fingerprinting, state enums. |
-| Processing | `dedup*.py`, `enrich/`, `exploitability.py`, `scoring.py`, `validation.py` | Transform findings. |
+| Processing | `dedup*.py`, `enrich/`, `exploitability.py`, `scoring.py`, `validation.py`, `threatmodel.py` | Transform findings; synthesize threat models. |
 | AI infrastructure | `llm.py` | Model routing + structured-output client. |
 | Orchestration | `pipeline.py` | Wire stages together; two ingest modes. |
 | Interfaces | `cli.py`, `web.py`, `static/` | CLI, HTTP API, dashboard. |
@@ -259,14 +259,20 @@ sum to 1):
 | Dimension | Weight | Signal |
 |---|---:|---|
 | severity | 0.30 | CVSS-derived base impact |
-| exploitability | 0.35 | AI score, EPSS, KEV (averaged) |
+| exploitability | 0.35 | AI score, EPSS, KEV, **threat signal** (averaged) |
 | exposure | 0.20 | network reachability of the path |
 | chaining | 0.15 | max chain score of chains the finding is in |
 
-Two overrides on top of the blend:
+Adjustments on top of the blend:
 - **KEV floor** — anything in the KEV catalog is floored to `kev_floor` (85).
   Actively exploited outweighs modelling.
 - **Corroboration bonus** — +2 when both scanners agree.
+- **Threat boost** — an *additive* bonus (up to `threat_boost`, default 15) for
+  findings implicated by the service threat model, scaled by the stronger of the
+  finding's threat signal and its service posture (§5.10). Additive, not a
+  reweighting, so runs *without* threat modeling are never penalized. Threats
+  also enrich the exploitability dimension directly (the threat signal is one of
+  the averaged inputs above).
 
 This is the reordering that makes the queue useful: an unreachable critical CVE
 drops below a reachable, chainable high.
@@ -300,20 +306,26 @@ carrying the composite score, risk rating, validation state, and — critically 
 the exploitability rationale and attack-chain context in the work notes, so a
 responder sees *why* the tool ranked it. `correlation_id` is the fingerprint,
 making the import idempotent: re-runs upsert the same item instead of creating
-duplicates, and closed items stay closed. Output is written to a file, or POSTed
-to the configured import table via the Table API.
+duplicates, and closed items stay closed. Output is written to a file — **JSON**
+(`servicenow_import.json`) or, when `servicenow.format: csv`, a **CSV**
+(`servicenow_import.csv`) for CSV Import Sets (multi-line work notes are quoted
+correctly) — or POSTed to the configured import table via the Table API. The
+format is settable in config, the config UI, or with `--sn-format` on the CLI.
 
 ### 5.9 Web UI (`web.py` + `static/index.html`)
 
 FastAPI backend holding the latest `PipelineResult` in memory; a single
 dependency-free HTML page for the frontend. Endpoints: `GET /api/state`,
 `POST /api/scan`, `POST /api/findings/{id}/state`, `GET /api/servicenow`, and
-`GET`/`POST /api/config`. Two views:
+`GET`/`POST /api/config`. Three views:
 
 - **Findings** — the triage queue with filters, signal badges, a per-finding
   detail drawer (CVSS vector, EPSS, reachability, provenance, rationale,
-  remediation, tags, chains), and inline validation-state editing that persists
-  to the sticky store.
+  remediation, tags, threats, chains), and inline validation-state editing that
+  persists to the sticky store.
+- **Threats** — the per-service threat models (§5.10): STRIDE threats with
+  linked findings/chains, assets, entry points, trust boundaries, posture, and
+  recommendations.
 - **Config** — edit non-secret settings live: default AI tier, per-task model
   routing, enrichment toggles, scoring weights, and the ServiceNow push flag.
   Secrets are shown masked and read-only (they stay in the environment). Edits
@@ -322,6 +334,35 @@ dependency-free HTML page for the frontend. Endpoints: `GET /api/state`,
   400 on bad input.
 
 ---
+
+### 5.10 Threat modeling (`threatmodel.py`, optional, deep tier)
+
+Where the exploitability engine works bottom-up (per-finding scores, concrete
+chains), threat modeling is the top-down counterpart. Per service it produces a
+**STRIDE threat model** grounded in that service's findings and chains:
+
+- **Assets** — what an attacker targets (data, credentials, functionality) with
+  a sensitivity note.
+- **Entry points / trust boundaries** — the attack surface implied by the
+  components and findings.
+- **Threats** — STRIDE-categorized, each citing the `related_finding_ids` and
+  `related_chain_ids` that evidence it, plus likelihood, impact, and mitigations.
+  The model is told to prefer fewer, well-grounded threats over generic ones.
+- **Posture** — an overall risk level, summary, and prioritized recommendations.
+
+It's optional (`threat_model.enabled`), per-service (like exploitability), routed
+to the `threat_model` task (the default deep tier unless overridden), and emits
+a `threat_models.json` artifact alongside the ServiceNow export. Threats
+reference findings by ID, so the UI cross-links both directions (a finding's
+drawer shows the threats it belongs to; a threat lists its findings).
+
+**It feeds back into scoring.** Because it runs *before* the scorer (unlike a
+terminal report), `apply_threat_influence` writes results back onto findings: it
+records the citing threat IDs, derives a per-finding `threat_signal` (0–100 from
+the strongest citing threat's likelihood), and raises the categorical
+exploitability *level* when the threat implies more than the isolated assessment
+did. The scorer then consumes the threat signal (exploitability dimension) and
+the per-service risk posture (additive threat boost) — see §5.6.
 
 ## 6. Data flow — a scan
 

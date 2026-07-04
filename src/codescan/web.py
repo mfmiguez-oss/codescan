@@ -56,7 +56,11 @@ def sanitized_config(cfg: Config) -> dict:
                 for name, t in cfg.ai.tasks.items()
             },
         },
-        "scoring": {"weights": dict(cfg.scoring.weights), "kev_floor": cfg.scoring.kev_floor},
+        "scoring": {
+            "weights": dict(cfg.scoring.weights),
+            "kev_floor": cfg.scoring.kev_floor,
+            "threat_boost": cfg.scoring.threat_boost,
+        },
         "enrichment": {
             "kev_enabled": cfg.enrichment.kev_enabled,
             "epss_enabled": cfg.enrichment.epss_enabled,
@@ -68,6 +72,7 @@ def sanitized_config(cfg: Config) -> dict:
             "instance": cfg.servicenow.instance,
             "push": cfg.servicenow.push,
             "import_table": cfg.servicenow.import_table,
+            "format": cfg.servicenow.format,
             "password": _mask(cfg.servicenow.password),
         },
         "connectors": {
@@ -109,6 +114,8 @@ def apply_config(cfg: Config, update: dict) -> None:
         cfg.scoring.weights = {k: float(v) for k, v in sc["weights"].items()}
     if "kev_floor" in sc:
         cfg.scoring.kev_floor = float(sc["kev_floor"])
+    if "threat_boost" in sc:
+        cfg.scoring.threat_boost = float(sc["threat_boost"])
 
     en = update.get("enrichment", {})
     for key in ("kev_enabled", "epss_enabled", "reachability_enabled", "ai_enabled"):
@@ -118,8 +125,14 @@ def apply_config(cfg: Config, update: dict) -> None:
     if "enabled" in update.get("threat_model", {}):
         cfg.threat_model.enabled = bool(update["threat_model"]["enabled"])
 
-    if "push" in update.get("servicenow", {}):
-        cfg.servicenow.push = bool(update["servicenow"]["push"])
+    sn = update.get("servicenow", {})
+    if "push" in sn:
+        cfg.servicenow.push = bool(sn["push"])
+    if "format" in sn:
+        fmt = str(sn["format"]).lower()
+        if fmt not in ("json", "csv"):
+            raise ValueError("servicenow.format must be 'json' or 'csv'")
+        cfg.servicenow.format = fmt
 
 
 def _valid_effort(v: str) -> str:
@@ -169,6 +182,8 @@ def finding_to_dict(f: Finding) -> dict:
             "epss": ex.epss,
             "rationale": ex.rationale,
             "chain_ids": ex.chain_ids,
+            "threat_ids": ex.threat_ids,
+            "threat_signal": ex.threat_signal,
         },
     }
 

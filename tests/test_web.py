@@ -105,6 +105,28 @@ def test_invalid_effort_rejected(tmp_path):
     assert _client(tmp_path).post("/api/config", json={"ai": {"effort": "turbo"}}).status_code == 400
 
 
+def test_servicenow_format_config(tmp_path):
+    client = _client(tmp_path)
+    body = client.post("/api/config", json={"servicenow": {"format": "csv"}}).json()
+    assert body["servicenow"]["format"] == "csv"
+    # Invalid format is rejected.
+    assert client.post("/api/config", json={"servicenow": {"format": "xml"}}).status_code == 400
+
+
+def test_scoring_threat_boost_config(tmp_path):
+    body = _client(tmp_path).post("/api/config", json={"scoring": {"threat_boost": 25}}).json()
+    assert body["scoring"]["threat_boost"] == 25
+
+
+def test_threat_model_toggle_and_state(tmp_path):
+    client = _client(tmp_path)
+    body = client.post("/api/config", json={"threat_model": {"enabled": True}}).json()
+    assert body["threat_model"]["enabled"] is True
+    assert "threat_model" in body["options"]["routed_tasks"]
+    # State always carries the threat_models list (empty in the offline/no-AI client).
+    assert "threat_models" in client.get("/api/state").json()
+
+
 def test_overrides_survive_restart(tmp_path):
     TestClient(_app(tmp_path, "ov.json")).post("/api/config", json={"enrichment": {"ai_enabled": True}})
     # A fresh app with the same overrides file must reflect the saved change.

@@ -163,6 +163,7 @@ let CHAINS_BY_ID = {};
 let THREATS_BY_FINDING = {};
 
 const riskColor = (s) => s >= 85 ? 'var(--crit)' : s >= 70 ? 'var(--high)' : s >= 40 ? 'var(--med)' : s > 0 ? 'var(--low)' : 'var(--info)';
+const riskColorName = (rl) => ({critical:'var(--crit)',high:'var(--high)',medium:'var(--med)',low:'var(--low)'}[rl] || 'var(--info)');
 const sevColor = (s) => ({critical:'var(--crit)',high:'var(--high)',medium:'var(--med)',low:'var(--low)',info:'var(--info)'}[s] || 'var(--info)');
 const esc = (t) => (t ?? '').toString().replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
@@ -191,6 +192,7 @@ function renderChips() {
     `<span class="chip"><b>${s.findings||0}</b> findings</span>`,
     `<span class="chip"><b>${s.repos||0}</b> repos</span>`,
     `<span class="chip" style="border-color:var(--crit)"><b>${s.kev||0}</b> KEV</span>`,
+    (s.threats ? `<span class="chip"><b>${s.threats}</b> threats</span>` : ''),
     `<span class="chip"><b>${sev.critical||0}</b> crit · <b>${sev.high||0}</b> high · <b>${sev.medium||0}</b> med</span>`,
   ].join('');
 }
@@ -297,6 +299,7 @@ function openDrawer(id) {
     </div>
     ${f.remediation ? `<div class="section"><h3>Remediation</h3><div class="rationale">${esc(f.remediation)}</div></div>` : ''}
     ${(f.tags && f.tags.length) ? `<div class="section"><h3>Tags</h3>${f.tags.map(t=>`<span class="badge">${esc(t)}</span>`).join('')}</div>` : ''}
+    ${(THREATS_BY_FINDING[f.id]||[]).length ? `<div class="section"><h3>Threats</h3>${THREATS_BY_FINDING[f.id].map(threatItem).join('')}</div>` : ''}
     ${chains.length ? `<div class="section"><h3>Attack chains</h3>${chains.map(chainCard).join('')}</div>` : ''}
     <div class="section">
       <h3>Description</h3>
@@ -316,6 +319,53 @@ function chainCard(c) {
     <div class="muted"><b>Preconditions:</b> ${esc(c.preconditions)}</div>
     <div class="muted"><b>Impact:</b> ${esc(c.impact)}</div>
     ${(c.mitre_attack||[]).length?`<div style="margin-top:6px">${c.mitre_attack.map(m=>`<span class="badge">${esc(m)}</span>`).join('')}</div>`:''}
+  </div>`;
+}
+
+function renderThreats() {
+  const tms = DATA.threat_models || [];
+  if (!tms.length) {
+    $('#threatsView').innerHTML = '<div class="empty">No threat models yet. Enable “Threat modeling” in Config and run a scan with AI enabled.</div>';
+    return;
+  }
+  $('#threatsView').innerHTML = tms.map(tmCard).join('');
+}
+
+function tmCard(tm) {
+  const rl = tm.risk_level || 'low';
+  const loz = (arr, fmt) => (arr || []).map(fmt).join('');
+  const assets = loz(tm.assets, a => `<span class="lozenge">${esc(a.name)}${a.sensitivity ? ` · ${esc(a.sensitivity)}` : ''}</span>`);
+  const entries = loz(tm.entry_points, e => `<span class="lozenge">${esc(e.name)}</span>`);
+  const bounds = loz(tm.trust_boundaries, b => `<span class="lozenge">${esc(b)}</span>`);
+  const recs = loz(tm.recommendations, r => `<li>${esc(r)}</li>`);
+  return `<div class="card tm">
+    <div class="head"><h3>${esc(tm.service)}</h3>
+      <span class="rl" style="background:${riskColorName(rl)}">${esc(rl)}</span>
+      <span class="muted">${(tm.threats || []).length} threats</span></div>
+    <p class="hint" style="font-size:13px">${esc(tm.posture_summary || '')}</p>
+    ${assets ? `<div class="section"><h3>Assets</h3>${assets}</div>` : ''}
+    ${entries ? `<div class="section"><h3>Entry points</h3>${entries}</div>` : ''}
+    ${bounds ? `<div class="section"><h3>Trust boundaries</h3>${bounds}</div>` : ''}
+    <div class="section"><h3>Threats</h3>${(tm.threats || []).map(threatItem).join('') || '<span class="muted">none</span>'}</div>
+    ${recs ? `<div class="section"><h3>Recommendations</h3><ul style="margin:0;padding-left:18px">${recs}</ul></div>` : ''}
+  </div>`;
+}
+
+function threatItem(t) {
+  const refs = (t.related_finding_ids || []).map(fid => {
+    const f = DATA.findings.find(x => x.id === fid);
+    return `<span class="fref" onclick="openDrawer('${fid}')">${esc(f ? f.title : fid.slice(0, 8))}</span>`;
+  }).join(', ');
+  const chainRefs = (t.related_chain_ids || []).map(c => `<span class="badge chain">${esc(c)}</span>`).join('');
+  const mit = (t.mitigations || []).map(m => `<li>${esc(m)}</li>`).join('');
+  return `<div class="chaincard">
+    <b>${esc(t.title)}</b> <span class="badge stride">${esc(t.stride)}</span>
+    <span class="muted">· ${esc(t.likelihood)} likelihood</span>
+    <div style="margin:6px 0">${esc(t.description)}</div>
+    ${t.impact ? `<div class="muted"><b>Impact:</b> ${esc(t.impact)}</div>` : ''}
+    ${refs ? `<div class="muted" style="margin-top:4px"><b>Findings:</b> ${refs}</div>` : ''}
+    ${chainRefs ? `<div style="margin-top:4px">${chainRefs}</div>` : ''}
+    ${mit ? `<div style="margin-top:6px"><b style="font-size:12px">Mitigations</b><ul style="margin:2px 0;padding-left:18px">${mit}</ul></div>` : ''}
   </div>`;
 }
 
@@ -422,6 +472,11 @@ function renderConfig() {
       <div class="formrow"><label>AI (remediation + tags)</label>${chk('en-ai', en.ai_enabled)}</div>
     </div>
     <div class="card">
+      <h4>Threat modeling</h4>
+      <p class="hint">Per-service STRIDE threat model (deep tier). An extra AI call per service — route it via the "threat_model" row above. Needs AI enabled on the scan.</p>
+      <div class="formrow"><label>Enable threat modeling</label><input type="checkbox" id="tm-enabled" ${c.threat_model.enabled ? 'checked' : ''}/></div>
+    </div>
+    <div class="card">
       <h4>Scoring weights</h4>
       <p class="hint">Blended into the 0–100 composite (auto-normalized). KEV floor overrides the blend.</p>
       <div class="formrow"><label>Severity</label>${wnum('w-sev', w.severity)}</div>
@@ -429,9 +484,11 @@ function renderConfig() {
       <div class="formrow"><label>Exposure</label>${wnum('w-exposure', w.exposure)}</div>
       <div class="formrow"><label>Chaining</label>${wnum('w-chain', w.chaining)}</div>
       <div class="formrow"><label>KEV floor</label><input type="number" id="kev-floor" value="${c.scoring.kev_floor}"/></div>
+      <div class="formrow"><label>Threat boost</label><input type="number" id="threat-boost" value="${c.scoring.threat_boost}"/></div>
     </div>
     <div class="card">
       <h4>ServiceNow</h4>
+      <div class="formrow"><label>Output format</label>${sel('sn-format', ['json', 'csv'], sn.format || 'json')}</div>
       <div class="formrow"><label>Push to instance</label><input type="checkbox" id="sn-push" ${sn.push ? 'checked' : ''}/></div>
       <div class="formrow ro"><label>Instance</label><span>${esc(sn.instance || '—')}</span></div>
       <div class="formrow ro"><label>Import table</label><span>${esc(sn.import_table)}</span></div>
@@ -460,8 +517,9 @@ async function saveConfig() {
   const update = {
     ai: { model: $('#ai-model').value, effort: $('#ai-effort').value, max_tokens: Number($('#ai-max').value), tasks },
     enrichment: { kev_enabled: $('#en-kev').checked, epss_enabled: $('#en-epss').checked, reachability_enabled: $('#en-reach').checked, ai_enabled: $('#en-ai').checked },
-    scoring: { weights: { severity: Number($('#w-sev').value), exploitability: Number($('#w-exp').value), exposure: Number($('#w-exposure').value), chaining: Number($('#w-chain').value) }, kev_floor: Number($('#kev-floor').value) },
-    servicenow: { push: $('#sn-push').checked },
+    threat_model: { enabled: $('#tm-enabled').checked },
+    scoring: { weights: { severity: Number($('#w-sev').value), exploitability: Number($('#w-exp').value), exposure: Number($('#w-exposure').value), chaining: Number($('#w-chain').value) }, kev_floor: Number($('#kev-floor').value), threat_boost: Number($('#threat-boost').value) },
+    servicenow: { push: $('#sn-push').checked, format: $('#sn-format').value },
   };
   const r = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(update) });
   if (!r.ok) { toast('Save failed — check values', false); return; }

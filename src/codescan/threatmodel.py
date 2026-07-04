@@ -17,7 +17,7 @@ import json
 from collections import defaultdict
 
 from .llm import LLMClient
-from .models import Asset, EntryPoint, Finding, Stride, Threat, ThreatModel
+from .models import Asset, EntryPoint, Finding, Severity, Stride, Threat, ThreatModel
 
 _STRIDE = [s.value for s in Stride]
 
@@ -101,7 +101,6 @@ def _finding_digest(f: Finding) -> dict:
         "cwes": f.cwe_ids,
         "severity": f.severity.value,
         "component": f"{f.component.name}@{f.component.version}",
-        "risk_score": f.risk_score,
         "exploitability": ex.score,
         "in_kev": ex.in_kev,
         "reachable": ex.reachable,
@@ -164,3 +163,45 @@ class ThreatModelEngine:
             risk_level=r.get("risk_level", ""),
             recommendations=r.get("recommendations", []),
         )
+
+
+_LIKELIHOOD = {"high": 100.0, "medium": 60.0, "low": 30.0}
+
+
+def apply_threat_influence(
+    findings: list[Finding], threat_models: list[ThreatModel]
+) -> dict[str, str]:
+    """Feed threat-model results back onto findings, and return per-service risk.
+
+    For each finding cited by a threat: record the threat IDs, derive a
+    `threat_signal` (0-100) from the strongest citing threat's likelihood, and
+    *enrich exploitability* by raising the categorical level (and noting why in
+    the rationale) when the threat implies more than the isolated assessment did.
+    The returned `{service: risk_level}` map feeds the scorer's threat boost.
+    """
+    by_fid: dict[str, list[Threat]] = defaultdict(list)
+    service_risk: dict[str, str] = {}
+    for tm in threat_models:
+        service_risk[tm.service] = tm.risk_level
+        for t in tm.threats:
+            for fid in t.related_finding_ids:
+                by_fid[fid].append(t)
+
+    for f in findings:
+        threats = by_fid.get(f.id, [])
+        if not threats:
+            continue
+        ex = f.exploitability
+        ex.threat_ids = [t.id for t in threats]
+        ex.threat_signal = max(_LIKELIHOOD.get(t.likelihood, 40.0) for t in threats)
+        implied = (Severity.high if ex.threat_signal >= 80
+                   else Severity.medium if ex.threat_signal >= 50 else Severity.low)
+        if implied.rank > ex.level.rank:
+            ex.level = implied
+            note = f" Elevated by threat model (cited in {len(threats)} threat(s))."
+            ex.rationale = (ex.rationale + note).strip()
+    return service_risk
+
+
+def service_risk_score(risk_level: str) -> float:
+    return {"critical": 100.0, "high": 75.0, "medium": 45.0, "low": 20.0}.get(risk_level, 0.0)

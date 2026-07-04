@@ -105,6 +105,18 @@ whose identifiers differ (same weakness, one has a CVE and the other only a CWE)
 It's conservative — same repo + same component, and only merges what the model
 is confident about.
 
+## Threat modeling
+
+Optional per-service **STRIDE threat model** (`threatmodel.py`, deep tier). Where
+exploitability works bottom-up (per-finding scores, chains), threat modeling is
+top-down: for each service it names the **assets**, **entry points / trust
+boundaries**, and **STRIDE threats** the findings and chains actually enable —
+each threat linked to its findings/chains, with likelihood, impact, and
+mitigations — plus an overall posture and recommendations. Enable it in config
+(`threat_model.enabled`) or the Config tab; it writes `threat_models.json` and
+powers the Threats tab. Route it via the `threat_model` task (default deep tier;
+`claude-fable-5` for the deepest analysis).
+
 ## Composite scoring
 
 `scoring.py` blends four weighted dimensions into a 0–100 risk score (weights in
@@ -113,12 +125,16 @@ config):
 | Dimension | Signal |
 |---|---|
 | severity | CVSS-derived base impact |
-| exploitability | AI judgement, EPSS, KEV |
+| exploitability | AI judgement, EPSS, KEV, **threat signal** |
 | exposure | network reachability of the vulnerable path |
 | chaining | membership in a scored attack chain |
 
 Anything in the KEV catalog is floored to `kev_floor` — *actively exploited*
-outweighs modelling. Multi-scanner agreement adds a small confidence bump.
+outweighs modelling. Multi-scanner agreement adds a small confidence bump. And
+when threat modeling is on, findings implicated by a service's threats get an
+additive **threat boost** (up to `threat_boost`, default 15) and their
+exploitability is enriched — threat models feed the score, they don't just
+report (see [Threat modeling](#threat-modeling)).
 
 ## Install
 
@@ -148,10 +164,14 @@ Analysts **change the validation state inline** (confirm, mark false positive,
 accept risk, …). Those decisions persist to the state store and are sticky — a
 re-scan never overturns an analyst's call.
 
+A **Threats** tab shows the per-service **STRIDE threat models** (see below):
+threats linked to their findings and chains, assets, entry points, trust
+boundaries, posture, and recommendations.
+
 A **Config** tab manages non-secret settings live: the default AI tier, per-task
-model routing, enrichment toggles, scoring weights, and the ServiceNow push
-flag. Secrets stay in the environment (shown masked, read-only). Edits apply to
-the next scan and persist to `config.overrides.json`.
+model routing, enrichment toggles, the threat-modeling toggle, scoring weights,
+and the ServiceNow push flag. Secrets stay in the environment (shown masked,
+read-only). Edits apply to the next scan and persist to `config.overrides.json`.
 
 Backend is FastAPI (`web.py`); the frontend is a single dependency-free HTML page
 (`static/index.html`) that talks to the same pipeline.
@@ -179,7 +199,9 @@ codescan scan --config config/config.example.yaml
 ```
 
 Flags: `--no-ai` (deterministic only), `--offline` (skip KEV/EPSS network calls),
-`--out` (ServiceNow import path), `--state` (validation-state store path).
+`--out` (ServiceNow import path), `--state` (validation-state store path),
+`--sn-format json|csv` (write a CSV for ServiceNow CSV Import Sets instead of
+JSON — also settable in config/UI).
 
 Inspect a produced import file:
 
@@ -199,6 +221,7 @@ src/codescan/
   dedup_ai.py          semantic near-duplicate merge (cheap tier / Haiku)
   enrich/              KEV, EPSS, reachability
   exploitability.py    Claude exploitability + chaining engine (deep tier)
+  threatmodel.py       per-service STRIDE threat modeling (deep tier)
   scoring.py           composite risk score
   validation.py        validation-state machine + sticky state store
   servicenow.py        Vulnerable Item export (file or Table API push)

@@ -28,9 +28,14 @@ def scan(
     offline: bool = typer.Option(
         False, "--offline", help="Skip network enrichment (KEV/EPSS)."
     ),
+    sn_format: str = typer.Option(
+        None, "--sn-format", help="ServiceNow output format: json|csv (overrides config)."
+    ),
 ) -> None:
     """Run the full pipeline and write a ServiceNow VR import file."""
     cfg = Config.load(config)
+    if sn_format:
+        cfg.servicenow.format = sn_format
     pipeline = Pipeline(cfg, offline=offline, use_ai=not no_ai)
     result = pipeline.run(fixtures=fixtures, out_path=out, state_path=state)
 
