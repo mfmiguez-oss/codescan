@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>codescan — vulnerability triage</title>
+<style>
+  :root {
+    --bg: #0f1420; --panel: #171d2b; --panel2: #1e2635; --line: #2a3346;
+    --txt: #e6ebf5; --muted: #8b97ad; --accent: #4f8cff;
+    --crit: #ff4d5e; --high: #ff8a3d; --med: #f5c542; --low: #57b894; --info: #6b7688;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         background: var(--bg); color: var(--txt); }
+  header { display: flex; align-items: center; gap: 16px; padding: 14px 20px;
+           background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 10; }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: .3px; }
+  header h1 .dim { color: var(--muted); font-weight: 400; }
+  .grow { flex: 1; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 6px;
+           padding: 8px 14px; font-weight: 600; cursor: pointer; }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--txt); }
+  button:disabled { opacity: .5; cursor: default; }
+  .chips { display: flex; gap: 10px; flex-wrap: wrap; }
+  .chip { background: var(--panel2); border: 1px solid var(--line); border-radius: 20px;
+          padding: 4px 12px; font-size: 12px; color: var(--muted); }
+  .chip b { color: var(--txt); }
+  .toolbar { display: flex; gap: 10px; align-items: center; padding: 12px 20px;
+             background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  input, select { background: var(--panel2); border: 1px solid var(--line); color: var(--txt);
+                  border-radius: 6px; padding: 7px 10px; font: inherit; }
+  input[type=search] { min-width: 220px; }
+  label.f { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; }
+  main { padding: 16px 20px 60px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; color: var(--muted); font-weight: 600; font-size: 12px;
+       text-transform: uppercase; letter-spacing: .4px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tr.row { cursor: pointer; }
+  tr.row:hover { background: var(--panel); }
+  .risk { display: inline-flex; align-items: center; justify-content: center; min-width: 42px;
+          padding: 4px 8px; border-radius: 6px; font-weight: 700; color: #0b0f18; }
+  .sev { font-size: 11px; text-transform: uppercase; font-weight: 700; letter-spacing: .4px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px;
+           background: var(--panel2); border: 1px solid var(--line); color: var(--muted); margin-right: 4px; }
+  .badge.kev { background: #3a1620; border-color: var(--crit); color: #ffb3bb; }
+  .badge.chain { background: #16233a; border-color: var(--accent); color: #b9d2ff; }
+  .badge.src { text-transform: uppercase; }
+  .muted { color: var(--muted); }
+  select.state { padding: 5px 8px; }
+  /* drawer */
+  .drawer { position: fixed; top: 0; right: 0; height: 100%; width: 520px; max-width: 92vw;
+            background: var(--panel); border-left: 1px solid var(--line); transform: translateX(100%);
+            transition: transform .18s ease; overflow-y: auto; z-index: 20; padding: 20px; }
+  .drawer.open { transform: translateX(0); }
+  .drawer h2 { margin: 0 0 4px; font-size: 16px; }
+  .drawer .close { position: absolute; top: 14px; right: 16px; background: none; color: var(--muted);
+                   border: 0; font-size: 22px; cursor: pointer; padding: 0; }
+  .kv { display: grid; grid-template-columns: 130px 1fr; gap: 6px 12px; margin: 14px 0; }
+  .kv .k { color: var(--muted); }
+  .section { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .section h3 { font-size: 12px; text-transform: uppercase; color: var(--muted); letter-spacing: .5px; margin: 0 0 8px; }
+  .rationale { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px;
+               padding: 12px; white-space: pre-wrap; }
+  .chaincard { background: var(--panel2); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+               border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+  .chaincard .cscore { float: right; font-weight: 700; }
+  a { color: var(--accent); }
+  .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 15; display: none; }
+  .backdrop.open { display: block; }
+  .empty { text-align: center; color: var(--muted); padding: 40px; }
+  /* nav tabs */
+  nav#nav { display: flex; gap: 4px; }
+  .tab { background: transparent; border: 1px solid transparent; color: var(--muted);
+         padding: 6px 12px; border-radius: 6px; font-weight: 600; }
+  .tab.active { background: var(--panel2); color: var(--txt); border-color: var(--line); }
+  /* config */
+  .cfg { max-width: 900px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+          padding: 16px 18px; margin-bottom: 16px; }
+  .card h4 { margin: 0 0 4px; font-size: 14px; }
+  .card p.hint { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+  .formrow { display: flex; align-items: center; gap: 12px; margin: 8px 0; }
+  .formrow > label { width: 210px; color: var(--muted); flex: none; }
+  .formrow input[type=number], .formrow input[type=text] { width: 160px; }
+  .formrow.ro span { color: var(--txt); }
+  .grid3 { display: grid; grid-template-columns: 130px repeat(3, 1fr); gap: 8px 10px; align-items: center; }
+  .grid3 .h { color: var(--muted); font-size: 12px; }
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+           background: #1e293b; border: 1px solid var(--accent); color: #fff; padding: 10px 18px;
+           border-radius: 8px; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 30; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>codescan <span class="dim">/ vulnerability triage</span></h1>
+  <nav id="nav">
+    <button class="tab active" data-view="findings">Findings</button>
+    <button class="tab" data-view="config">Config</button>
+  </nav>
+  <div class="chips" id="chips"></div>
+  <div class="grow"></div>
+  <label class="f"><input type="checkbox" id="opt-ai" /> AI</label>
+  <label class="f"><input type="checkbox" id="opt-offline" checked /> offline</label>
+  <button id="scan">Run scan</button>
+</header>
+
+<div class="toolbar" id="toolbar">
+  <input type="search" id="q" placeholder="Search title, CVE, component…" />
+  <label class="f">severity
+    <select id="f-sev"><option value="">all</option></select>
+  </label>
+  <label class="f">state
+    <select id="f-state"><option value="">all</option></select>
+  </label>
+  <label class="f">repo
+    <select id="f-repo"><option value="">all</option></select>
+  </label>
+  <label class="f">min risk <span id="minlabel">0</span>
+    <input type="range" id="f-min" min="0" max="100" value="0" />
+  </label>
+  <div class="grow"></div>
+  <button class="ghost" id="chainsBtn">Attack chains (0)</button>
+</div>
+
+<main>
+  <div id="findingsView">
+    <table>
+      <thead><tr>
+        <th>Risk</th><th>Sev</th><th>Validation state</th><th>Title</th>
+        <th>Repo</th><th>Component</th><th>Signals</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty" style="display:none">No findings match the filters.</div>
+  </div>
+  <section id="configView" class="cfg" style="display:none"></section>
+</main>
+
+<div class="backdrop" id="backdrop"></div>
+<aside class="drawer" id="drawer"></aside>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let DATA = { findings: [], chains: [], states: [], summary: {} };
+let CHAINS_BY_ID = {};
+
+const riskColor = (s) => s >= 85 ? 'var(--crit)' : s >= 70 ? 'var(--high)' : s >= 40 ? 'var(--med)' : s > 0 ? 'var(--low)' : 'var(--info)';
+const sevColor = (s) => ({critical:'var(--crit)',high:'var(--high)',medium:'var(--med)',low:'var(--low)',info:'var(--info)'}[s] || 'var(--info)');
+const esc = (t) => (t ?? '').toString().replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+async function load(payload) {
+  DATA = payload;
+  CHAINS_BY_ID = Object.fromEntries((DATA.chains || []).map(c => [c.chain_id, c]));
+  renderChips();
+  fillFilter('#f-sev', ['critical','high','medium','low','info']);
+  fillFilter('#f-state', DATA.states);
+  fillFilter('#f-repo', [...new Set(DATA.findings.map(f => f.repo))].sort());
+  $('#chainsBtn').textContent = `Attack chains (${(DATA.chains||[]).length})`;
+  render();
+}
+
+function renderChips() {
+  const s = DATA.summary || {};
+  const sev = s.by_severity || {};
+  $('#chips').innerHTML = [
+    `<span class="chip"><b>${s.findings||0}</b> findings</span>`,
+    `<span class="chip"><b>${s.repos||0}</b> repos</span>`,
+    `<span class="chip" style="border-color:var(--crit)"><b>${s.kev||0}</b> KEV</span>`,
+    `<span class="chip"><b>${sev.critical||0}</b> crit · <b>${sev.high||0}</b> high · <b>${sev.medium||0}</b> med</span>`,
+  ].join('');
+}
+
+function fillFilter(sel, values) {
+  const el = $(sel), cur = el.value;
+  el.innerHTML = '<option value="">all</option>' + values.map(v => `<option>${esc(v)}</option>`).join('');
+  el.value = cur;
+}
+
+function filtered() {
+  const q = $('#q').value.toLowerCase();
+  const sev = $('#f-sev').value, st = $('#f-state').value, repo = $('#f-repo').value;
+  const min = +$('#f-min').value;
+  return DATA.findings.filter(f => {
+    if (sev && f.severity !== sev) return false;
+    if (st && f.validation_state !== st) return false;
+    if (repo && f.repo !== repo) return false;
+    if (f.risk_score < min) return false;
+    if (q) {
+      const hay = (f.title + ' ' + f.cve_ids.join(' ') + ' ' + f.component + ' ' + f.repo).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+function render() {
+  const list = filtered();
+  $('#empty').style.display = list.length ? 'none' : 'block';
+  $('#rows').innerHTML = list.map(f => {
+    const ex = f.exploitability;
+    const signals = [
+      ex.in_kev ? '<span class="badge kev">KEV</span>' : '',
+      ex.chain_ids.length ? `<span class="badge chain">chain×${ex.chain_ids.length}</span>` : '',
+      ex.epss != null ? `<span class="badge">EPSS ${(ex.epss*100).toFixed(0)}%</span>` : '',
+      f.sources.map(s => `<span class="badge src">${esc(s)}</span>`).join(''),
+    ].join('');
+    return `<tr class="row" data-id="${f.id}">
+      <td><span class="risk" style="background:${riskColor(f.risk_score)}">${f.risk_score.toFixed(0)}</span></td>
+      <td><span class="sev" style="color:${sevColor(f.severity)}">${f.severity}</span></td>
+      <td>${stateSelect(f)}</td>
+      <td>${esc(f.title)}<div class="muted" style="font-size:12px">${esc(f.cve_ids.join(', '))}</div></td>
+      <td class="muted">${esc(f.repo)}</td>
+      <td class="muted">${esc(f.component)}<div style="font-size:12px">${esc(f.version||'')}</div></td>
+      <td>${signals}</td>
+    </tr>`;
+  }).join('');
+  $('#rows').querySelectorAll('tr.row').forEach(tr => {
+    tr.addEventListener('click', (e) => {
+      if (e.target.closest('select')) return;
+      openDrawer(tr.dataset.id);
+    });
+  });
+  $('#rows').querySelectorAll('select.state').forEach(sel => {
+    sel.addEventListener('change', () => changeState(sel.dataset.id, sel.value));
+  });
+}
+
+function stateSelect(f) {
+  const opts = DATA.states.map(s => `<option value="${s}" ${s===f.validation_state?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('');
+  return `<select class="state" data-id="${f.id}" onclick="event.stopPropagation()">${opts}</select>`;
+}
+
+async function changeState(id, state) {
+  const r = await fetch(`/api/findings/${id}/state`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({state})
+  });
+  if (!r.ok) { alert('Failed to update state'); return; }
+  const updated = await r.json();
+  const i = DATA.findings.findIndex(f => f.id === id);
+  if (i >= 0) DATA.findings[i] = updated;
+  if ($('#drawer').classList.contains('open') && $('#drawer').dataset.id === id) openDrawer(id);
+}
+
+function openDrawer(id) {
+  const f = DATA.findings.find(x => x.id === id);
+  if (!f) return;
+  const ex = f.exploitability;
+  const chains = ex.chain_ids.map(cid => CHAINS_BY_ID[cid]).filter(Boolean);
+  const drawer = $('#drawer');
+  drawer.dataset.id = id;
+  drawer.innerHTML = `
+    <button class="close" onclick="closeDrawer()">×</button>
+    <h2>${esc(f.title)}</h2>
+    <div class="muted">${esc(f.cve_ids.join(', ') || 'no CVE')} · ${esc(f.cwe_ids.join(', '))}</div>
+    <div style="margin-top:10px"><span class="risk" style="background:${riskColor(f.risk_score)};min-width:56px">${f.risk_score.toFixed(0)}</span>
+      <span class="badge">${f.servicenow_state}</span>
+      ${ex.in_kev?'<span class="badge kev">KEV — actively exploited</span>':''}</div>
+    <div class="kv">
+      <div class="k">Component</div><div>${esc(f.component)} ${esc(f.version||'')}</div>
+      <div class="k">Repository</div><div>${esc(f.repo)}</div>
+      <div class="k">Location</div><div class="muted">${esc(f.path||'—')}</div>
+      <div class="k">CVSS</div><div>${f.cvss_score ?? '—'} <span class="muted">${esc(f.cvss_vector||'')}</span></div>
+      <div class="k">EPSS</div><div>${ex.epss!=null?(ex.epss*100).toFixed(1)+'%':'—'}</div>
+      <div class="k">Reachable</div><div>${ex.reachable===true?'yes':ex.reachable===false?'no':'unknown'}</div>
+      <div class="k">Reported by</div><div>${f.sources.map(s=>`<span class="badge src">${esc(s)}</span>`).join('')}</div>
+      <div class="k">Fixed in</div><div>${esc(f.fixed_in.join(', ')||'—')}</div>
+    </div>
+    <div class="section">
+      <h3>Exploitability — ${esc(ex.level)} (${ex.score.toFixed(0)}/100)</h3>
+      <div class="rationale">${esc(ex.rationale || 'No AI rationale (run a scan with AI enabled).')}</div>
+    </div>
+    ${f.remediation ? `<div class="section"><h3>Remediation</h3><div class="rationale">${esc(f.remediation)}</div></div>` : ''}
+    ${(f.tags && f.tags.length) ? `<div class="section"><h3>Tags</h3>${f.tags.map(t=>`<span class="badge">${esc(t)}</span>`).join('')}</div>` : ''}
+    ${chains.length ? `<div class="section"><h3>Attack chains</h3>${chains.map(chainCard).join('')}</div>` : ''}
+    <div class="section">
+      <h3>Description</h3>
+      <div class="muted" style="white-space:pre-wrap">${esc(f.description||'—')}</div>
+    </div>
+    ${f.references.length ? `<div class="section"><h3>References</h3>${f.references.map(r=>`<div><a href="${esc(r)}" target="_blank" rel="noopener">${esc(r)}</a></div>`).join('')}</div>` : ''}
+  `;
+  drawer.classList.add('open');
+  $('#backdrop').classList.add('open');
+}
+
+function chainCard(c) {
+  return `<div class="chaincard">
+    <span class="cscore" style="color:${riskColor(c.chain_score)}">${c.chain_score}</span>
+    <b>${esc(c.chain_id)}</b> <span class="muted">· ${esc(c.likelihood)} likelihood</span>
+    <div style="margin:6px 0">${esc(c.narrative)}</div>
+    <div class="muted"><b>Preconditions:</b> ${esc(c.preconditions)}</div>
+    <div class="muted"><b>Impact:</b> ${esc(c.impact)}</div>
+    ${(c.mitre_attack||[]).length?`<div style="margin-top:6px">${c.mitre_attack.map(m=>`<span class="badge">${esc(m)}</span>`).join('')}</div>`:''}
+  </div>`;
+}
+
+function openChains() {
+  const drawer = $('#drawer');
+  drawer.dataset.id = '';
+  const chains = DATA.chains || [];
+  drawer.innerHTML = `<button class="close" onclick="closeDrawer()">×</button>
+    <h2>Attack chains (${chains.length})</h2>
+    <div class="muted">Multi-step attack paths across findings in a service.</div>
+    <div class="section">${chains.length?chains.map(chainCard).join(''):'<div class="muted">None. Run a scan with AI enabled to discover chains.</div>'}</div>`;
+  drawer.classList.add('open');
+  $('#backdrop').classList.add('open');
+}
+
+function closeDrawer() {
+  $('#drawer').classList.remove('open');
+  $('#backdrop').classList.remove('open');
+}
+
+async function runScan() {
+  const btn = $('#scan'); btn.disabled = true; btn.textContent = 'Scanning…';
+  try {
+    const r = await fetch('/api/scan', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ use_ai: $('#opt-ai').checked, offline: $('#opt-offline').checked })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    await load(await r.json());
+  } catch (e) { alert('Scan failed: ' + e.message); }
+  finally { btn.disabled = false; btn.textContent = 'Run scan'; }
+}
+
+['#q','#f-sev','#f-state','#f-repo'].forEach(s => $(s).addEventListener('input', render));
+$('#f-min').addEventListener('input', () => { $('#minlabel').textContent = $('#f-min').value; render(); });
+$('#scan').addEventListener('click', runScan);
+$('#chainsBtn').addEventListener('click', openChains);
+$('#backdrop').addEventListener('click', closeDrawer);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+
+fetch('/api/state').then(r => r.json()).then(load);
+</script>
+</body>
+</html>

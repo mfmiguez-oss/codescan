@@ -1,0 +1,32 @@
+{
+  "violations": [
+    {
+      "issue_id": "XRAY-99001",
+      "summary": "Remote Code Execution (Log4Shell)",
+      "severity": "Critical",
+      "impacted_artifact": "org.apache.logging.log4j:log4j-core:2.14.1",
+      "package_type": "maven",
+      "cve_ids": ["CVE-2021-44228"],
+      "cwe": ["CWE-502"],
+      "cves": [
+        {"cve": "CVE-2021-44228", "cvss_v3_score": 10.0, "cvss_v3_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"}
+      ],
+      "fixed_versions": ["2.15.0"],
+      "description": "JNDI injection leads to remote code execution."
+    },
+    {
+      "issue_id": "XRAY-99002",
+      "summary": "Insecure deserialization in jackson-databind",
+      "severity": "High",
+      "impacted_artifact": "com.fasterxml.jackson.core:jackson-databind:2.9.8",
+      "package_type": "maven",
+      "cve_ids": ["CVE-2019-14540"],
+      "cwe": ["CWE-502"],
+      "cves": [
+        {"cve": "CVE-2019-14540", "cvss_v3_score": 9.8, "cvss_v3_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}
+      ],
+      "fixed_versions": ["2.9.10"],
+      "description": "Polymorphic deserialization gadget enables code execution when attacker controls JSON input to an internal endpoint."
+    }
+  ]
+}

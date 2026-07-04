@@ -1,0 +1,74 @@
+# codescan configuration. Values here can reference ${ENV_VAR} for secrets.
+
+ai:
+  # Default tier — used by any AI task without a more specific override below.
+  # Set to claude-fable-5 for the hardest analysis (the client auto-enables
+  # refusal fallbacks on Fable since security tooling can trip false-positive
+  # classifier refusals).
+  model: claude-opus-4-8
+  effort: high            # low | medium | high | xhigh | max
+  max_tokens: 32000
+
+  # Per-task model routing: cheap models for mechanical work, deep models for
+  # reasoning. Unset fields inherit the default tier above. Built-in defaults
+  # (in llm.py) already route dedup -> Haiku, so this block is optional.
+  tasks:
+    dedup:                # semantic near-duplicate detection (mechanical)
+      model: claude-haiku-4-5
+      max_tokens: 8000    # note: Haiku ignores `effort`; the client omits it
+    exploitability:       # per-finding exploitability + attack-chain reasoning
+      model: claude-opus-4-8
+      effort: xhigh
+      # For the deepest chaining analysis, use:
+      # model: claude-fable-5
+    enrichment:           # AI remediation guidance + tags (cheap, mechanical)
+      model: claude-haiku-4-5
+
+bitbucket:
+  base_url: ${BITBUCKET_BASE_URL}
+  token: ${BITBUCKET_TOKEN}
+  # Restrict the scan surface. Empty projects list = all projects the token can see.
+  projects: []           # e.g. ["PAY", "PLATFORM"]
+  verify_tls: true
+
+snyk:
+  api_url: ${SNYK_API_URL}
+  token: ${SNYK_TOKEN}
+  org_id: ${SNYK_ORG_ID}
+  verify_tls: true
+
+xray:
+  base_url: ${XRAY_BASE_URL}
+  token: ${XRAY_TOKEN}
+  verify_tls: true
+
+servicenow:
+  instance: ${SERVICENOW_INSTANCE}
+  user: ${SERVICENOW_USER}
+  password: ${SERVICENOW_PASSWORD}
+  # If false, codescan writes the import payload to disk instead of POSTing.
+  push: false
+  # ServiceNow Vulnerable Item import target (Import Set / Vulnerability integration).
+  import_table: sn_vul_vulnerable_item
+
+enrichment:
+  # CISA Known Exploited Vulnerabilities catalog.
+  kev_url: https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json
+  # FIRST EPSS API.
+  epss_url: https://api.first.org/data/v1/epss
+  # Toggle enrichers (also editable from the config UI). Deterministic enrichers
+  # run first; the AI enricher adds remediation guidance + tags (needs AI on).
+  kev_enabled: true
+  epss_enabled: true
+  reachability_enabled: true
+  ai_enabled: false
+
+scoring:
+  # Weights for the composite 0-100 risk score. Must sum to 1.0.
+  weights:
+    severity: 0.30       # base CVSS-derived severity
+    exploitability: 0.35 # AI + KEV + EPSS + reachability
+    exposure: 0.20       # internet-facing / runtime reachable
+    chaining: 0.15       # membership in a multi-step attack chain
+  # A finding in the KEV catalog is floored to at least this score.
+  kev_floor: 85

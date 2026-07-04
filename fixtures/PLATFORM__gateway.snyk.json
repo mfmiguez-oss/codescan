@@ -1,0 +1,20 @@
+{
+  "projectName": "PLATFORM/gateway package.json",
+  "issues": [
+    {
+      "id": "SNYK-JS-LODASH-567746",
+      "pkgName": "lodash",
+      "pkgVersions": ["4.17.15"],
+      "issueData": {
+        "title": "Prototype Pollution",
+        "severity": "medium",
+        "cvssScore": 5.6,
+        "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L",
+        "identifiers": {"CVE": ["CVE-2020-8203"], "CWE": ["CWE-1321"]},
+        "packageManager": "npm",
+        "description": "Prototype pollution in lodash. The affected function is not reachable from any exported request handler in this service.",
+        "fixedIn": ["4.17.19"]
+      }
+    }
+  ]
+}

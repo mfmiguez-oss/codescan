@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "codescan-ui",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "codescan.cli", "serve", "--port", "8000"],
+      "port": 8000
+    }
+  ]
+}

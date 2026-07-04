@@ -1,0 +1,12 @@
+.env
+*.pyc
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+servicenow_import.json
+sn_demo.json
+validation_state.json
+state_demo.json
+node_modules/

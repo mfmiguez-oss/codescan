@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 660" width="2000" height="1320" role="img" font-family="Segoe UI, Roboto, system-ui, sans-serif">
+  <title>codescan architecture</title>
+  <desc>Bitbucket, Snyk and Xray feed a pipeline that ingests, deduplicates (deterministic then AI/Haiku), enriches with KEV/EPSS/reachability, runs AI exploitability and attack-chain analysis (Opus/Fable), scores, and assigns validation states, then exports to ServiceNow VR and a web UI, with a sticky state store feeding back.</desc>
+
+  <rect x="0" y="0" width="1000" height="660" fill="#ffffff"/>
+
+  <!-- title -->
+  <text x="40" y="42" font-size="22" font-weight="700" fill="#0f172a">codescan — architecture</text>
+  <text x="40" y="64" font-size="13" fill="#64748b">Scanner aggregation → AI exploitability &amp; vulnerability chaining → ServiceNow Vulnerability Response</text>
+
+  <!-- SOURCES -->
+  <text x="40" y="94" font-size="11" font-weight="700" letter-spacing="1" fill="#94a3b8">SOURCES</text>
+  <g font-size="14" font-weight="600" fill="#0f172a">
+    <rect x="110" y="100" width="180" height="52" rx="8" fill="#f1f5f9" stroke="#475569"/>
+    <text x="200" y="126" text-anchor="middle">Bitbucket</text>
+    <text x="200" y="143" text-anchor="middle" font-size="11" font-weight="400" fill="#64748b">repo inventory</text>
+
+    <rect x="410" y="100" width="180" height="52" rx="8" fill="#f1f5f9" stroke="#475569"/>
+    <text x="500" y="126" text-anchor="middle">Snyk</text>
+    <text x="500" y="143" text-anchor="middle" font-size="11" font-weight="400" fill="#64748b">SCA / SAST findings</text>
+
+    <rect x="710" y="100" width="180" height="52" rx="8" fill="#f1f5f9" stroke="#475569"/>
+    <text x="800" y="126" text-anchor="middle">JFrog Xray</text>
+    <text x="800" y="143" text-anchor="middle" font-size="11" font-weight="400" fill="#64748b">artifacts / CVEs</text>
+  </g>
+
+  <!-- source arrows into intake bar -->
+  <g stroke="#94a3b8" stroke-width="2" fill="none" marker-end="url(#ah)">
+    <path d="M200,152 L200,194"/>
+    <path d="M500,152 L500,194"/>
+    <path d="M800,152 L800,194"/>
+  </g>
+
+  <!-- PIPELINE panel -->
+  <rect x="40" y="180" width="920" height="264" rx="12" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="56" y="202" font-size="11" font-weight="700" letter-spacing="1" fill="#94a3b8">PIPELINE</text>
+
+  <!-- intake bar -->
+  <rect x="64" y="196" width="872" height="42" rx="8" fill="#eef2f7" stroke="#64748b"/>
+  <text x="500" y="222" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">Ingest &amp; Normalize  →  canonical Finding</text>
+
+  <!-- Row A -->
+  <g font-size="13.5" font-weight="600" fill="#0f172a">
+    <rect x="64" y="262" width="270" height="58" rx="8" fill="#eef2f7" stroke="#64748b"/>
+    <text x="199" y="286" text-anchor="middle">Deterministic dedup</text>
+    <text x="199" y="304" text-anchor="middle" font-size="11" font-weight="400" fill="#64748b">fingerprint merge</text>
+
+    <rect x="350" y="262" width="270" height="58" rx="8" fill="#e8f0ff" stroke="#3b6fe0"/>
+    <text x="485" y="286" text-anchor="middle" fill="#1d4ed8">Semantic dedup</text>
+    <text x="485" y="304" text-anchor="middle" font-size="11" font-weight="400" fill="#3b6fe0">AI · Haiku 4.5</text>
+
+    <rect x="636" y="262" width="270" height="58" rx="8" fill="#eef2f7" stroke="#64748b"/>
+    <text x="771" y="286" text-anchor="middle">Enrich</text>
+    <text x="771" y="304" text-anchor="middle" font-size="11" font-weight="400" fill="#64748b">KEV · EPSS · reachability</text>
+  </g>
+
+  <!-- Row B -->
+  <g font-size="13.5" font-weight="600" fill="#0f172a">
+    <rect x="64" y="352" width="270" height="58" rx="8" fill="#e8f0ff" stroke="#3b6fe0"/>
+    <text x="199" y="376" text-anchor="middle" fill="#1d4ed8">Exploitability + chaining</text>
+    <text x="199" y="394" text-anchor="middle" font-size="11" font-weight="400" fill="#3b6fe0">AI · Opus 4.8 / Fable 5</text>
+
+    <rect x="350" y="352" width="270" height="58" rx="8" fill="#eef2f7" stroke="#64748b"/>
+    <text x="485" y="376" text-anchor="middle">Composite score</text>
+    <text x="485" y="394" text-anchor="middle" font-size="11" font-weight="400" fill="#64748b">severity·exploit·exposure·chain</text>
+
+    <rect x="636" y="352" width="270" height="58" rx="8" fill="#eef2f7" stroke="#64748b"/>
+    <text x="771" y="376" text-anchor="middle">Validation states</text>
+    <text x="771" y="394" text-anchor="middle" font-size="11" font-weight="400" fill="#64748b">proposed · analyst-confirmed</text>
+  </g>
+
+  <!-- intra-row arrows -->
+  <g stroke="#94a3b8" stroke-width="2" fill="none" marker-end="url(#ah)">
+    <path d="M334,291 L350,291"/>
+    <path d="M620,291 L636,291"/>
+    <path d="M334,381 L350,381"/>
+    <path d="M620,381 L636,381"/>
+    <!-- intake to Row A -->
+    <path d="M199,238 L199,262"/>
+    <!-- Enrich (Row A) down and back to Exploitability (Row B) -->
+    <path d="M771,320 L771,336 L199,336 L199,352"/>
+  </g>
+
+  <!-- OUTPUTS -->
+  <text x="40" y="480" font-size="11" font-weight="700" letter-spacing="1" fill="#94a3b8">OUTPUTS</text>
+  <g font-size="14" font-weight="600" fill="#0f172a">
+    <rect x="250" y="490" width="250" height="58" rx="8" fill="#f1f5f9" stroke="#475569"/>
+    <text x="375" y="514" text-anchor="middle">ServiceNow VR export</text>
+    <text x="375" y="532" text-anchor="middle" font-size="11" font-weight="400" fill="#64748b">idempotent vulnerable items</text>
+
+    <rect x="560" y="490" width="200" height="58" rx="8" fill="#f1f5f9" stroke="#475569"/>
+    <text x="660" y="514" text-anchor="middle">Web UI / API</text>
+    <text x="660" y="532" text-anchor="middle" font-size="11" font-weight="400" fill="#64748b">analyst triage</text>
+  </g>
+
+  <!-- state store -->
+  <g>
+    <path d="M820,494 a55,8 0 0 1 110,0 v46 a55,8 0 0 1 -110,0 z" fill="#eef2f7" stroke="#64748b"/>
+    <path d="M820,494 a55,8 0 0 0 110,0" fill="none" stroke="#64748b"/>
+    <text x="875" y="522" text-anchor="middle" font-size="12.5" font-weight="600" fill="#0f172a">State store</text>
+    <text x="875" y="537" text-anchor="middle" font-size="10.5" fill="#64748b">sticky</text>
+  </g>
+
+  <!-- validation -> outputs -->
+  <g stroke="#94a3b8" stroke-width="2" fill="none" marker-end="url(#ah)">
+    <path d="M700,410 L420,486"/>
+    <path d="M740,410 L665,486"/>
+  </g>
+  <!-- feedback loop: UI -> store -> validation (dashed) -->
+  <g stroke="#3b6fe0" stroke-width="1.8" fill="none" stroke-dasharray="5 4" marker-end="url(#ahb)">
+    <path d="M760,519 L818,519"/>
+    <path d="M875,494 L875,430 L800,412"/>
+  </g>
+  <text x="792" y="470" font-size="10.5" fill="#3b6fe0">state changes</text>
+
+  <!-- LEGEND -->
+  <g font-size="12" fill="#334155">
+    <rect x="40" y="600" width="16" height="16" rx="3" fill="#eef2f7" stroke="#64748b"/>
+    <text x="64" y="612">Deterministic — no API key required</text>
+    <rect x="330" y="600" width="16" height="16" rx="3" fill="#e8f0ff" stroke="#3b6fe0"/>
+    <text x="354" y="612">AI stage (LLM) — optional, task-routed by tier</text>
+    <path d="M700,608 L724,608" stroke="#3b6fe0" stroke-width="1.8" stroke-dasharray="5 4" fill="none" marker-end="url(#ahb)"/>
+    <text x="732" y="612">analyst feedback (sticky)</text>
+  </g>
+
+  <defs>
+    <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#94a3b8"/>
+    </marker>
+    <marker id="ahb" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#3b6fe0"/>
+    </marker>
+  </defs>
+</svg>
