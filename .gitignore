@@ -10,3 +10,4 @@ sn_demo.json
 validation_state.json
 state_demo.json
 node_modules/
+config.overrides.json

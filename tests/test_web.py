@@ -11,16 +11,20 @@ from codescan.web import create_app
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _client(tmp_path):
-    app = create_app(
+def _app(tmp_path, overrides="overrides.json"):
+    return create_app(
         config_path=str(ROOT / "config" / "config.example.yaml"),
         fixtures=str(ROOT / "fixtures"),
         use_ai=False,
         offline=True,
         out_path=str(tmp_path / "sn.json"),
         state_path=str(tmp_path / "state.json"),
+        overrides_path=str(tmp_path / overrides),
     )
-    return TestClient(app)
+
+
+def _client(tmp_path):
+    return TestClient(_app(tmp_path))
 
 
 def test_index_served(tmp_path):
@@ -68,3 +72,41 @@ def test_servicenow_endpoint(tmp_path):
     records = r.json()["records"]
     assert len(records) == 4
     assert all(rec["correlation_id"] for rec in records)
+
+
+def test_get_config_masks_secrets(tmp_path):
+    body = _client(tmp_path).get("/api/config").json()
+    assert body["options"]["known_models"] and body["options"]["routed_tasks"]
+    assert "severity" in body["scoring"]["weights"]
+    assert set(body["enrichment"]) >= {"kev_enabled", "epss_enabled", "reachability_enabled", "ai_enabled"}
+    # Any configured secret is masked, never returned raw.
+    for conn in body["connectors"].values():
+        tok = conn.get("token", "")
+        assert tok in ("", "••••••••")
+
+
+def test_update_config_applies_and_persists(tmp_path):
+    client = _client(tmp_path)
+    update = {
+        "enrichment": {"kev_enabled": False, "ai_enabled": True},
+        "scoring": {"weights": {"severity": 0.5, "exploitability": 0.2, "exposure": 0.2, "chaining": 0.1}, "kev_floor": 90},
+        "ai": {"model": "claude-opus-4-8", "effort": "high", "max_tokens": 32000,
+               "tasks": {"exploitability": {"model": "claude-fable-5", "effort": "xhigh", "max_tokens": 40000}}},
+    }
+    body = client.post("/api/config", json=update).json()
+    assert body["enrichment"]["kev_enabled"] is False
+    assert body["enrichment"]["ai_enabled"] is True
+    assert body["scoring"]["kev_floor"] == 90
+    assert body["ai"]["tasks"]["exploitability"]["model"] == "claude-fable-5"
+    assert (tmp_path / "overrides.json").exists()
+
+
+def test_invalid_effort_rejected(tmp_path):
+    assert _client(tmp_path).post("/api/config", json={"ai": {"effort": "turbo"}}).status_code == 400
+
+
+def test_overrides_survive_restart(tmp_path):
+    TestClient(_app(tmp_path, "ov.json")).post("/api/config", json={"enrichment": {"ai_enabled": True}})
+    # A fresh app with the same overrides file must reflect the saved change.
+    body = TestClient(_app(tmp_path, "ov.json")).get("/api/config").json()
+    assert body["enrichment"]["ai_enabled"] is True

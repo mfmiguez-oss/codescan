@@ -50,8 +50,8 @@
     <text x="485" y="304" text-anchor="middle" font-size="11" font-weight="400" fill="#3b6fe0">AI · Haiku 4.5</text>
 
     <rect x="636" y="262" width="270" height="58" rx="8" fill="#eef2f7" stroke="#64748b"/>
-    <text x="771" y="286" text-anchor="middle">Enrich</text>
-    <text x="771" y="304" text-anchor="middle" font-size="11" font-weight="400" fill="#64748b">KEV · EPSS · reachability</text>
+    <text x="771" y="286" text-anchor="middle">Enrich (pluggable)</text>
+    <text x="771" y="304" text-anchor="middle" font-size="11" font-weight="400" fill="#64748b">KEV · EPSS · reach · AI</text>
   </g>
 
   <!-- Row B -->

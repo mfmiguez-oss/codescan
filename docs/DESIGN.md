@@ -184,19 +184,27 @@ slug and is the documented integration point to harden for production (§11).
    what the model marks as clearly the same vulnerability. Different CVEs on the
    same package stay separate unless the descriptions say otherwise.
 
-### 5.3 Enrichment (deterministic signals)
+### 5.3 Enrichment (pluggable framework)
 
-`enrich/enricher.py` attaches three grounded facts before the LLM runs:
+Enrichment is a **framework**, not a fixed step. Each source is a `BaseEnricher`
+(`enrich/`) with an `enrich(findings)` method; `build_enrichers` assembles the
+enabled ones from config and runs them in order. Adding a source (VEX, internal
+asset criticality, exploit-DB) is a new subclass — no pipeline change. Built-in
+enrichers:
 
-- **CISA KEV** — is the CVE actively exploited in the wild?
-- **FIRST EPSS** — probability of exploitation (batched API lookups).
-- **Reachability** — heuristic over scanner metadata (Snyk reachable-vuln data
-  when present). Returns `True`/`False`/`unknown`; the negative phrasing is
-  checked first so "not reachable" isn't misread as "reachable".
+- **CISA KEV** (`kev.py`) — is the CVE actively exploited in the wild?
+- **FIRST EPSS** (`epss.py`) — probability of exploitation (batched lookups).
+- **Reachability** (`reachability.py`) — heuristic over scanner metadata; returns
+  `True`/`False`/`unknown` (negative phrasing checked first so "not reachable"
+  isn't misread as "reachable").
+- **AI enrichment** (`ai.py`, optional, cheap tier) — remediation guidance +
+  categorization tags, and a reachability judgement when the scanner gave none.
+  It complements the exploitability engine (which scores and chains) rather than
+  duplicating it, and is routed to the `enrichment` task (Haiku by default).
 
-These run first because they are cheap and authoritative, and because the LLM
-should *reason over* them rather than recall CVE trivia from memory. Network
-failures degrade gracefully (empty KEV/EPSS) rather than failing the run.
+Deterministic enrichers run first — cheap, authoritative, and grounding for the
+LLM stages. Each is toggleable in config and **from the config UI** (§5.9).
+Network failures degrade gracefully rather than failing the run.
 
 ### 5.4 Exploitability & chaining engine
 
@@ -299,10 +307,19 @@ to the configured import table via the Table API.
 
 FastAPI backend holding the latest `PipelineResult` in memory; a single
 dependency-free HTML page for the frontend. Endpoints: `GET /api/state`,
-`POST /api/scan`, `POST /api/findings/{id}/state`, `GET /api/servicenow`. The
-dashboard is the triage queue with filters, signal badges, a per-finding detail
-drawer (CVSS vector, EPSS, reachability, provenance, rationale, chains), and
-inline validation-state editing that persists to the sticky store.
+`POST /api/scan`, `POST /api/findings/{id}/state`, `GET /api/servicenow`, and
+`GET`/`POST /api/config`. Two views:
+
+- **Findings** — the triage queue with filters, signal badges, a per-finding
+  detail drawer (CVSS vector, EPSS, reachability, provenance, rationale,
+  remediation, tags, chains), and inline validation-state editing that persists
+  to the sticky store.
+- **Config** — edit non-secret settings live: default AI tier, per-task model
+  routing, enrichment toggles, scoring weights, and the ServiceNow push flag.
+  Secrets are shown masked and read-only (they stay in the environment). Edits
+  apply to the next scan and persist to `config.overrides.json`, layered over
+  the base config on restart. `POST` is validated server-side and rejected with
+  400 on bad input.
 
 ---
 

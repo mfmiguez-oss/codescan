@@ -70,7 +70,7 @@ def main() -> None:
     # row A
     box(ax, 64, 262, 270, 58, "Deterministic dedup", "fingerprint merge", NEUTRAL)
     box(ax, 350, 262, 270, 58, "Semantic dedup", "AI · Haiku 4.5", AI)
-    box(ax, 636, 262, 270, 58, "Enrich", "KEV · EPSS · reachability", NEUTRAL)
+    box(ax, 636, 262, 270, 58, "Enrich (pluggable)", "KEV · EPSS · reach · AI", NEUTRAL)
     # row B
     box(ax, 64, 352, 270, 58, "Exploitability + chaining", "AI · Opus 4.8 / Fable 5", AI)
     box(ax, 350, 352, 270, 58, "Composite score", "severity·exploit·exposure·chain", NEUTRAL)

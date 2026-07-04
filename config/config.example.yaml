@@ -63,6 +63,12 @@ enrichment:
   reachability_enabled: true
   ai_enabled: false
 
+# Per-service STRIDE threat modeling (AI, deep tier). Off by default — it's an
+# extra call per service. Route it via ai.tasks.threat_model (defaults to the
+# default tier; set to claude-fable-5 for the deepest analysis).
+threat_model:
+  enabled: false
+
 scoring:
   # Weights for the composite 0-100 risk score. Must sum to 1.0.
   weights:

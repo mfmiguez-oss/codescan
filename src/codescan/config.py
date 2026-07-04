@@ -82,6 +82,12 @@ class EnrichmentConfig(BaseModel):
     ai_enabled: bool = False        # LLM remediation + tags (task "enrichment")
 
 
+class ThreatModelConfig(BaseModel):
+    # Off by default — it's an extra deep-tier call per service. Route via the
+    # "threat_model" task in ai.tasks (defaults to the default tier).
+    enabled: bool = False
+
+
 class ScoringConfig(BaseModel):
     weights: dict[str, float] = {
         "severity": 0.30,
@@ -99,6 +105,7 @@ class Config(BaseModel):
     xray: XrayConfig = XrayConfig()
     servicenow: ServiceNowConfig = ServiceNowConfig()
     enrichment: EnrichmentConfig = EnrichmentConfig()
+    threat_model: ThreatModelConfig = ThreatModelConfig()
     scoring: ScoringConfig = ScoringConfig()
 
     @classmethod

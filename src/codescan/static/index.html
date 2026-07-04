@@ -91,6 +91,17 @@
            background: #1e293b; border: 1px solid var(--accent); color: #fff; padding: 10px 18px;
            border-radius: 8px; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 30; }
   .toast.show { opacity: 1; }
+  /* threats */
+  .tm { margin-bottom: 20px; }
+  .tm .head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; }
+  .tm .head h3 { margin: 0; font-size: 15px; }
+  .rl { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px;
+        padding: 3px 9px; border-radius: 5px; color: #0b0f18; }
+  .stride { text-transform: uppercase; font-size: 10px; letter-spacing: .3px;
+            background: #2a2140; border: 1px solid #6d5bd0; color: #cfc3ff; }
+  .lozenge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px;
+             background: var(--panel2); border: 1px solid var(--line); color: var(--muted); margin: 2px 4px 2px 0; }
+  .fref { cursor: pointer; color: var(--accent); }
 </style>
 </head>
 <body>
@@ -98,6 +109,7 @@
   <h1>codescan <span class="dim">/ vulnerability triage</span></h1>
   <nav id="nav">
     <button class="tab active" data-view="findings">Findings</button>
+    <button class="tab" data-view="threats">Threats</button>
     <button class="tab" data-view="config">Config</button>
   </nav>
   <div class="chips" id="chips"></div>
@@ -136,6 +148,7 @@
     </table>
     <div class="empty" id="empty" style="display:none">No findings match the filters.</div>
   </div>
+  <section id="threatsView" class="cfg" style="display:none"></section>
   <section id="configView" class="cfg" style="display:none"></section>
 </main>
 
@@ -145,8 +158,9 @@
 
 <script>
 const $ = (s) => document.querySelector(s);
-let DATA = { findings: [], chains: [], states: [], summary: {} };
+let DATA = { findings: [], chains: [], threat_models: [], states: [], summary: {} };
 let CHAINS_BY_ID = {};
+let THREATS_BY_FINDING = {};
 
 const riskColor = (s) => s >= 85 ? 'var(--crit)' : s >= 70 ? 'var(--high)' : s >= 40 ? 'var(--med)' : s > 0 ? 'var(--low)' : 'var(--info)';
 const sevColor = (s) => ({critical:'var(--crit)',high:'var(--high)',medium:'var(--med)',low:'var(--low)',info:'var(--info)'}[s] || 'var(--info)');
@@ -155,6 +169,13 @@ const esc = (t) => (t ?? '').toString().replace(/[&<>]/g, c => ({'&':'&amp;','<'
 async function load(payload) {
   DATA = payload;
   CHAINS_BY_ID = Object.fromEntries((DATA.chains || []).map(c => [c.chain_id, c]));
+  THREATS_BY_FINDING = {};
+  (DATA.threat_models || []).forEach(tm => (tm.threats || []).forEach(t => {
+    t._service = tm.service;
+    (t.related_finding_ids || []).forEach(fid => { (THREATS_BY_FINDING[fid] ||= []).push(t); });
+  }));
+  const nThreats = (DATA.threat_models || []).reduce((n, tm) => n + (tm.threats || []).length, 0);
+  document.querySelector('.tab[data-view="threats"]').textContent = nThreats ? `Threats (${nThreats})` : 'Threats';
   renderChips();
   fillFilter('#f-sev', ['critical','high','medium','low','info']);
   fillFilter('#f-state', DATA.states);
@@ -334,6 +355,120 @@ $('#scan').addEventListener('click', runScan);
 $('#chainsBtn').addEventListener('click', openChains);
 $('#backdrop').addEventListener('click', closeDrawer);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+
+// ---- view switching ----
+function switchView(view) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
+  $('#toolbar').style.display = view === 'findings' ? 'flex' : 'none';
+  $('#findingsView').style.display = view === 'findings' ? 'block' : 'none';
+  $('#threatsView').style.display = view === 'threats' ? 'block' : 'none';
+  $('#configView').style.display = view === 'config' ? 'block' : 'none';
+  if (view === 'config' && !CONFIG) loadConfig();
+  if (view === 'threats') renderThreats();
+}
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => switchView(t.dataset.view)));
+
+// ---- config management ----
+let CONFIG = null;
+function toast(msg, ok = true) {
+  const el = $('#toast'); el.textContent = msg;
+  el.style.borderColor = ok ? 'var(--accent)' : 'var(--crit)';
+  el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 1800);
+}
+async function loadConfig() {
+  CONFIG = await (await fetch('/api/config')).json();
+  renderConfig();
+}
+function sel(id, options, val, blank) {
+  const o = (blank != null ? `<option value="">${blank}</option>` : '') +
+    options.map(x => `<option ${x === val ? 'selected' : ''}>${x}</option>`).join('');
+  return `<select id="${id}">${o}</select>`;
+}
+function renderConfig() {
+  const c = CONFIG, M = c.options.known_models, E = c.options.efforts;
+  const w = c.scoring.weights, en = c.enrichment, sn = c.servicenow, cn = c.connectors;
+  const chk = (id, v) => `<input type="checkbox" id="${id}" ${v ? 'checked' : ''}/>`;
+  const wnum = (id, v) => `<input type="number" step="0.05" id="${id}" value="${v}"/>`;
+  const tasksHtml = c.options.routed_tasks.map(t => {
+    const tc = c.ai.tasks[t] || {};
+    return `<div class="grid3" style="margin:6px 0">
+      <div style="font-weight:600">${t}</div>
+      ${sel(`task-${t}-model`, M, tc.model || '', '(default)')}
+      ${sel(`task-${t}-effort`, E, tc.effort || '', '(inherit)')}
+      <input type="number" id="task-${t}-max" value="${tc.max_tokens ?? ''}" placeholder="inherit"/>
+    </div>`;
+  }).join('');
+
+  $('#configView').innerHTML = `
+    <div class="card">
+      <h4>AI — default tier</h4>
+      <p class="hint">Used by any AI task without a specific route below.</p>
+      <div class="formrow"><label>Model</label>${sel('ai-model', M, c.ai.model)}</div>
+      <div class="formrow"><label>Effort</label>${sel('ai-effort', E, c.ai.effort)}</div>
+      <div class="formrow"><label>Max tokens</label><input type="number" id="ai-max" value="${c.ai.max_tokens}"/></div>
+    </div>
+    <div class="card">
+      <h4>Model routing by task</h4>
+      <p class="hint">Cheap models for mechanical work (dedup, enrichment), deep models for reasoning (exploitability). Blank inherits the default tier.</p>
+      <div class="grid3"><div class="h">Task</div><div class="h">Model</div><div class="h">Effort</div><div class="h">Max tokens</div></div>
+      ${tasksHtml}
+    </div>
+    <div class="card">
+      <h4>Enrichment</h4>
+      <p class="hint">Deterministic enrichers run first; the AI enricher adds remediation + tags (needs AI enabled on the scan).</p>
+      <div class="formrow"><label>CISA KEV</label>${chk('en-kev', en.kev_enabled)}</div>
+      <div class="formrow"><label>FIRST EPSS</label>${chk('en-epss', en.epss_enabled)}</div>
+      <div class="formrow"><label>Reachability</label>${chk('en-reach', en.reachability_enabled)}</div>
+      <div class="formrow"><label>AI (remediation + tags)</label>${chk('en-ai', en.ai_enabled)}</div>
+    </div>
+    <div class="card">
+      <h4>Scoring weights</h4>
+      <p class="hint">Blended into the 0–100 composite (auto-normalized). KEV floor overrides the blend.</p>
+      <div class="formrow"><label>Severity</label>${wnum('w-sev', w.severity)}</div>
+      <div class="formrow"><label>Exploitability</label>${wnum('w-exp', w.exploitability)}</div>
+      <div class="formrow"><label>Exposure</label>${wnum('w-exposure', w.exposure)}</div>
+      <div class="formrow"><label>Chaining</label>${wnum('w-chain', w.chaining)}</div>
+      <div class="formrow"><label>KEV floor</label><input type="number" id="kev-floor" value="${c.scoring.kev_floor}"/></div>
+    </div>
+    <div class="card">
+      <h4>ServiceNow</h4>
+      <div class="formrow"><label>Push to instance</label><input type="checkbox" id="sn-push" ${sn.push ? 'checked' : ''}/></div>
+      <div class="formrow ro"><label>Instance</label><span>${esc(sn.instance || '—')}</span></div>
+      <div class="formrow ro"><label>Import table</label><span>${esc(sn.import_table)}</span></div>
+      <div class="formrow ro"><label>Password</label><span>${esc(sn.password || '(unset)')}</span></div>
+    </div>
+    <div class="card">
+      <h4>Connectors <span class="muted" style="font-weight:400">— secrets managed via environment</span></h4>
+      <div class="formrow ro"><label>Bitbucket URL</label><span>${esc(cn.bitbucket.base_url || '—')}</span></div>
+      <div class="formrow ro"><label>Bitbucket token</label><span>${esc(cn.bitbucket.token || '(unset)')}</span></div>
+      <div class="formrow ro"><label>Snyk URL</label><span>${esc(cn.snyk.api_url || '—')}</span></div>
+      <div class="formrow ro"><label>Snyk token</label><span>${esc(cn.snyk.token || '(unset)')}</span></div>
+      <div class="formrow ro"><label>Xray URL</label><span>${esc(cn.xray.base_url || '—')}</span></div>
+      <div class="formrow ro"><label>Xray token</label><span>${esc(cn.xray.token || '(unset)')}</span></div>
+    </div>
+    <button id="saveCfg">Save configuration</button>
+    <span class="muted" style="margin-left:12px">Applies to the next scan. Persisted to config.overrides.json.</span>
+  `;
+  $('#saveCfg').addEventListener('click', saveConfig);
+}
+async function saveConfig() {
+  const numOrNull = id => { const v = $('#' + id).value.trim(); return v === '' ? null : Number(v); };
+  const tasks = {};
+  CONFIG.options.routed_tasks.forEach(t => {
+    tasks[t] = { model: $('#task-' + t + '-model').value, effort: $('#task-' + t + '-effort').value, max_tokens: numOrNull('task-' + t + '-max') };
+  });
+  const update = {
+    ai: { model: $('#ai-model').value, effort: $('#ai-effort').value, max_tokens: Number($('#ai-max').value), tasks },
+    enrichment: { kev_enabled: $('#en-kev').checked, epss_enabled: $('#en-epss').checked, reachability_enabled: $('#en-reach').checked, ai_enabled: $('#en-ai').checked },
+    scoring: { weights: { severity: Number($('#w-sev').value), exploitability: Number($('#w-exp').value), exposure: Number($('#w-exposure').value), chaining: Number($('#w-chain').value) }, kev_floor: Number($('#kev-floor').value) },
+    servicenow: { push: $('#sn-push').checked },
+  };
+  const r = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(update) });
+  if (!r.ok) { toast('Save failed — check values', false); return; }
+  CONFIG = await r.json();
+  renderConfig();
+  toast('Configuration saved');
+}
 
 fetch('/api/state').then(r => r.json()).then(load);
 </script>

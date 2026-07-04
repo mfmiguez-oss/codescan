@@ -168,3 +168,51 @@ class Finding(BaseModel):
         if not self.merged_sources:
             self.merged_sources = [self.source]
         return self
+
+
+# --- Threat modeling (service-level synthesis of the findings) -------------
+
+class Stride(str, Enum):
+    """STRIDE threat categories."""
+
+    spoofing = "spoofing"
+    tampering = "tampering"
+    repudiation = "repudiation"
+    information_disclosure = "information_disclosure"
+    denial_of_service = "denial_of_service"
+    elevation_of_privilege = "elevation_of_privilege"
+
+
+class Asset(BaseModel):
+    name: str
+    sensitivity: str = ""             # high | medium | low, or a short note
+
+
+class EntryPoint(BaseModel):
+    name: str
+    description: str = ""
+
+
+class Threat(BaseModel):
+    id: str
+    title: str
+    stride: Stride
+    description: str = ""
+    likelihood: str = ""              # high | medium | low
+    impact: str = ""
+    related_finding_ids: list[str] = Field(default_factory=list)
+    related_chain_ids: list[str] = Field(default_factory=list)
+    mitigations: list[str] = Field(default_factory=list)
+
+
+class ThreatModel(BaseModel):
+    """Per-service threat model derived from that service's findings and chains."""
+
+    service: str                      # repo full name
+    assets: list[Asset] = Field(default_factory=list)
+    entry_points: list[EntryPoint] = Field(default_factory=list)
+    trust_boundaries: list[str] = Field(default_factory=list)
+    threats: list[Threat] = Field(default_factory=list)
+    posture_summary: str = ""
+    risk_level: str = ""              # critical | high | medium | low
+    recommendations: list[str] = Field(default_factory=list)

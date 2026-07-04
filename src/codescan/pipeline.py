@@ -13,6 +13,7 @@ produces scored, ServiceNow-ready output when no Anthropic key is available.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -23,9 +24,10 @@ from .dedup_ai import SemanticDeduper
 from .enrich import build_enrichers, run_enrichment
 from .exploitability import ExploitabilityEngine
 from .llm import LLMClient, ModelRouter
-from .models import Finding, Repo
+from .models import Finding, Repo, ThreatModel
 from .scoring import Scorer
 from .servicenow import ServiceNowExporter
+from .threatmodel import ThreatModelEngine
 from .validation import StateStore, assign_states
 
 
@@ -34,6 +36,7 @@ class PipelineResult:
     repos: list[Repo] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
     chains: list[dict] = field(default_factory=list)
+    threat_models: list[ThreatModel] = field(default_factory=list)
     servicenow_items: list[dict] = field(default_factory=list)
 
     def summary(self) -> dict:
@@ -46,6 +49,8 @@ class PipelineResult:
             "repos": len(self.repos),
             "findings": len(self.findings),
             "chains": len(self.chains),
+            "threats": sum(len(tm.threats) for tm in self.threat_models),
+            "threat_models": len(self.threat_models),
             "kev": sum(1 for f in self.findings if f.exploitability.in_kev),
             "by_severity": by_sev,
             "by_validation_state": by_state,
@@ -126,8 +131,16 @@ class Pipeline:
         assign_states(findings, store)
         store.save()
 
+        threat_models: list[ThreatModel] = []
+        if llm and self.cfg.threat_model.enabled:
+            threat_models = ThreatModelEngine(llm).build(findings, chains)  # deep tier
+            Path(out_path).with_name("threat_models.json").write_text(
+                json.dumps([tm.model_dump() for tm in threat_models], indent=2),
+                encoding="utf-8",
+            )
+
         exporter = ServiceNowExporter(self.cfg.servicenow)
         items = exporter.export(findings, chains, out_path)
 
         return PipelineResult(repos=repos, findings=findings, chains=chains,
-                              servicenow_items=items)
+                              threat_models=threat_models, servicenow_items=items)

@@ -33,7 +33,7 @@ KNOWN_MODELS = [
     "claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-4-5",
 ]
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
-ROUTED_TASKS = ["dedup", "exploitability", "enrichment"]
+ROUTED_TASKS = ["dedup", "exploitability", "enrichment", "threat_model"]
 
 
 def _mask(secret: str) -> str:
@@ -63,6 +63,7 @@ def sanitized_config(cfg: Config) -> dict:
             "reachability_enabled": cfg.enrichment.reachability_enabled,
             "ai_enabled": cfg.enrichment.ai_enabled,
         },
+        "threat_model": {"enabled": cfg.threat_model.enabled},
         "servicenow": {
             "instance": cfg.servicenow.instance,
             "push": cfg.servicenow.push,
@@ -113,6 +114,9 @@ def apply_config(cfg: Config, update: dict) -> None:
     for key in ("kev_enabled", "epss_enabled", "reachability_enabled", "ai_enabled"):
         if key in en:
             setattr(cfg.enrichment, key, bool(en[key]))
+
+    if "enabled" in update.get("threat_model", {}):
+        cfg.threat_model.enabled = bool(update["threat_model"]["enabled"])
 
     if "push" in update.get("servicenow", {}):
         cfg.servicenow.push = bool(update["servicenow"]["push"])
@@ -238,6 +242,7 @@ def _payload(state: AppState) -> dict:
         "summary": r.summary(),
         "findings": [finding_to_dict(f) for f in findings],
         "chains": r.chains,
+        "threat_models": [tm.model_dump() for tm in r.threat_models],
         "states": [s.value for s in ValidationState],
         "mode": {"use_ai": state.use_ai, "offline": state.offline},
     }

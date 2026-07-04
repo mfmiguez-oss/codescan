@@ -38,12 +38,18 @@ diagram is in [docs/architecture.svg](docs/architecture.svg) /
 
 ## Exploitability & chaining
 
-Deterministic signals answer *how dangerous is this CVE in general* — they come
-from the enrichment stage:
+Enrichment is a **pluggable framework** (`enrich/`) — each source is a
+`BaseEnricher`, toggleable in config and from the UI. Adding a source (VEX, asset
+criticality, exploit-DB) is a new subclass. Built-in enrichers:
 
 - **CISA KEV** — is the CVE in the Known Exploited Vulnerabilities catalog?
 - **FIRST EPSS** — probability of exploitation in the wild.
 - **Reachability** — is the vulnerable code path actually reachable?
+- **AI enrichment** (optional, cheap tier) — remediation guidance + tags per
+  finding; complements the exploitability engine rather than duplicating it.
+
+The deterministic signals above answer *how dangerous is this CVE in general* and
+ground the LLM stages.
 
 Claude answers the judgement-heavy questions those signals can't:
 
@@ -141,6 +147,11 @@ attack chains it belongs to (narrative, preconditions, impact, MITRE ATT&CK).
 Analysts **change the validation state inline** (confirm, mark false positive,
 accept risk, …). Those decisions persist to the state store and are sticky — a
 re-scan never overturns an analyst's call.
+
+A **Config** tab manages non-secret settings live: the default AI tier, per-task
+model routing, enrichment toggles, scoring weights, and the ServiceNow push
+flag. Secrets stay in the environment (shown masked, read-only). Edits apply to
+the next scan and persist to `config.overrides.json`.
 
 Backend is FastAPI (`web.py`); the frontend is a single dependency-free HTML page
 (`static/index.html`) that talks to the same pipeline.

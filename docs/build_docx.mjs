@@ -170,8 +170,15 @@ const children = [
     "Deterministic (dedup.py) — group by fingerprint, merge collisions. The merge keeps the higher-severity record as primary, unions CVEs/CWEs/references/fixes, prefers a present CVSS and the longer description, and records provenance from every contributing scanner. A finding seen by both scanners earns a corroboration bonus in scoring.",
     "Semantic (dedup_ai.py, optional, cheap tier) — catches cross-scanner duplicates the fingerprint misses (same weakness, divergent identifiers). Deliberately narrow: only compares findings in the same repo + same component, and only merges what the model marks as clearly the same vulnerability.",
   ]),
-  H2("5.3 Enrichment (deterministic signals)"),
-  P("enrich/enricher.py attaches three grounded facts before the LLM runs: CISA KEV (actively exploited?), FIRST EPSS (exploitation probability, batched), and reachability (heuristic over scanner metadata; True/False/unknown). These run first because they are cheap and authoritative, and because the LLM should reason over them rather than recall CVE trivia. Network failures degrade gracefully rather than failing the run."),
+  H2("5.3 Enrichment (pluggable framework)"),
+  P("Enrichment is a framework, not a fixed step. Each source is a BaseEnricher (enrich/) with an enrich(findings) method; build_enrichers assembles the enabled ones from config and runs them in order. Adding a source (VEX, asset criticality, exploit-DB) is a new subclass with no pipeline change."),
+  ...bullets([
+    "CISA KEV — is the CVE actively exploited in the wild?",
+    "FIRST EPSS — probability of exploitation (batched lookups).",
+    "Reachability — heuristic over scanner metadata; True/False/unknown (negative phrasing checked first).",
+    "AI enrichment (optional, cheap tier) — remediation guidance + categorization tags, plus a reachability judgement when the scanner gave none. Complements the exploitability engine; routed to the enrichment task (Haiku by default).",
+  ]),
+  P("Deterministic enrichers run first — cheap, authoritative, and grounding for the LLM stages. Each is toggleable in config and from the config UI. Network failures degrade gracefully rather than failing the run."),
   H2("5.4 Exploitability & chaining engine"),
   P("exploitability.py is the core value-add. Per service, it sends the LLM the finding set plus the deterministic signals and asks two things: (1) per-finding exploitability in our context (0-100), weighting actively-exploited / high-EPSS / reachable issues up and unreachable / fixed issues down; and (2) attack chains — ordered sequences of findings that combine into greater impact (e.g. SSRF reaches an internal service carrying an unauthenticated RCE), each with narrative, preconditions, impact, likelihood, chain score, and MITRE ATT&CK mapping."),
   ...bullets([
@@ -207,7 +214,8 @@ const children = [
   H2("5.8 ServiceNow export (servicenow.py)"),
   P("Builds sn_vul_vulnerable_item records, highest-risk first, carrying the composite score, risk rating, validation state, and the exploitability rationale plus attack-chain context in the work notes — so a responder sees why the tool ranked it. correlation_id is the fingerprint, making the import idempotent: re-runs upsert the same item and closed items stay closed. Output is written to a file, or POSTed to the import table via the Table API."),
   H2("5.9 Web UI (web.py + static/index.html)"),
-  P("A FastAPI backend holds the latest result in memory; the frontend is a single dependency-free HTML page. The dashboard is the triage queue with filters, signal badges, a per-finding detail drawer (CVSS vector, EPSS, reachability, provenance, rationale, chains), and inline validation-state editing that persists to the sticky store."),
+  P("A FastAPI backend holds the latest result in memory; the frontend is a single dependency-free HTML page with two views. Findings: the triage queue with filters, signal badges, a per-finding detail drawer (CVSS vector, EPSS, reachability, provenance, rationale, remediation, tags, chains), and inline validation-state editing that persists to the sticky store."),
+  P("Config: edit non-secret settings live — default AI tier, per-task model routing, enrichment toggles, scoring weights, and the ServiceNow push flag. Secrets are shown masked and read-only (they stay in the environment). Edits apply to the next scan and persist to config.overrides.json, layered over the base config on restart; POST is validated server-side and rejected with 400 on bad input."),
 
   H1("6. Data flow — a scan"),
   P("On run: list Bitbucket repos; fetch Snyk + Xray findings; normalize and run deterministic dedup; (optional) semantic dedup via Haiku; KEV/EPSS enrichment; (optional) exploitability + chaining via Opus/Fable; composite score; validation states; build/push ServiceNow vulnerable items. The result (findings, chains, items) is returned to the CLI or UI. See Figure 1 for the stage graph."),
