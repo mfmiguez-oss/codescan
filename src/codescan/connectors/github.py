@@ -23,13 +23,32 @@ class GitHubConnector:
         self.http.session.headers["X-GitHub-Api-Version"] = "2022-11-28"
 
     def list_repos(self) -> list[Repo]:
+        # Most specific scope wins: explicit repos, then orgs, then everything.
+        if self.cfg.repos:
+            return [self._get_repo(full) for full in self.cfg.repos]
         if self.cfg.orgs:
             repos: list[Repo] = []
             for org in self.cfg.orgs:
                 repos.extend(self._to_repo(r) for r in self._paged(f"/orgs/{org}/repos"))
             return repos
-        # No orgs configured: every repo the token can access.
+        # No repos/orgs configured: every repo the token can access.
         return [self._to_repo(r) for r in self._paged("/user/repos")]
+
+    def _get_repo(self, full_name: str) -> Repo:
+        """Fetch a single 'owner/name' repo (GET /repos/{owner}/{name})."""
+        try:
+            return self._to_repo(self.http.get(f"/repos/{full_name}").json())
+        except RuntimeError as exc:
+            if "404" in str(exc):
+                # GitHub returns 404 (not 403) for private repos you can't see.
+                raise RuntimeError(
+                    f"GitHub repo '{full_name}' not found or not accessible. "
+                    "If it is private, set GITHUB_TOKEN with access to it "
+                    "(classic PAT with the 'repo' scope, or a fine-grained PAT "
+                    "granting this repo Metadata: Read + Contents: Read). "
+                    "Otherwise verify the owner/name."
+                ) from exc
+            raise
 
     def _to_repo(self, r: dict) -> Repo:
         owner = (r.get("owner") or {}).get("login", "")

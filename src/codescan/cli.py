@@ -31,11 +31,21 @@ def scan(
     sn_format: str = typer.Option(
         None, "--sn-format", help="ServiceNow output format: json|csv (overrides config)."
     ),
+    repo: list[str] = typer.Option(
+        None, "--repo",
+        help="Target specific GitHub repo(s) 'owner/name'. Implies GitHub source "
+             "and a live scan. Repeatable.",
+    ),
 ) -> None:
     """Run the full pipeline and write a ServiceNow VR import file."""
     cfg = Config.load(config)
     if sn_format:
         cfg.servicenow.format = sn_format
+    if repo:
+        # Scope to specific GitHub repos -> GitHub source, live ingest.
+        cfg.source.provider = "github"
+        cfg.github.repos = list(repo)
+        fixtures = None
     pipeline = Pipeline(cfg, offline=offline, use_ai=not no_ai)
     result = pipeline.run(fixtures=fixtures, out_path=out, state_path=state)
 

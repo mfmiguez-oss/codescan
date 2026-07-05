@@ -43,6 +43,7 @@ class Severity(str, Enum):
 class Source(str, Enum):
     snyk = "snyk"
     xray = "xray"
+    openhack = "openhack"       # whitebox source review (Hadrian OpenHack)
 
 
 class ValidationState(str, Enum):

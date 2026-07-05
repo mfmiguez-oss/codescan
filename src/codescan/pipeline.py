@@ -19,7 +19,7 @@ from pathlib import Path
 
 from .config import Config
 from .connectors import (
-    BitbucketConnector, GitHubConnector, SnykConnector, XrayConnector,
+    BitbucketConnector, GitHubConnector, OpenHackConnector, SnykConnector, XrayConnector,
 )
 from .dedup import deduplicate
 from .dedup_ai import SemanticDeduper
@@ -83,7 +83,14 @@ class Pipeline:
         repo_by_name = {r.slug: r.full_name for r in repos}
         snyk = SnykConnector(self.cfg.snyk).fetch(repo_by_name)
         xray = XrayConnector(self.cfg.xray).fetch(repo_by_name)
-        return repos, [*snyk, *xray]
+        findings = [*snyk, *xray]
+        # OpenHack whitebox findings (from a run directory) — covers repos the
+        # SCA/CVE scanners haven't scanned.
+        oh = self.cfg.openhack
+        if oh.enabled and oh.findings_dir:
+            oh_repo = oh.repo or (repos[0].full_name if repos else "openhack")
+            findings.extend(OpenHackConnector().from_dir(oh.findings_dir, oh_repo))
+        return repos, findings
 
     def _ingest_fixtures(self, fixtures: Path) -> tuple[list[Repo], list[Finding]]:
         """Load `<repo>.snyk.json` / `<repo>.xray.json` files from a directory.
@@ -104,6 +111,8 @@ class Pipeline:
                 findings.extend(snyk.from_file(path, repo_full))
             elif ".xray." in stem:
                 findings.extend(xray.from_file(path, repo_full))
+            elif ".openhack." in stem:
+                findings.extend(OpenHackConnector().from_file(path, repo_full))
         return list(repos.values()), findings
 
     # --- run --------------------------------------------------------------

@@ -38,17 +38,32 @@ class HttpClient:
 
     def _request(self, method: str, path: str, **kwargs: Any) -> requests.Response:
         url = path if path.startswith("http") else f"{self.base_url}/{path.lstrip('/')}"
+        if not url.lower().startswith(("http://", "https://")):
+            # No base URL configured (e.g. an unset ${..._URL} env var). Fail fast
+            # with a clear message instead of retrying a schemeless URL.
+            raise RuntimeError(
+                f"{method} {path}: no base URL configured (resolved to '{url}'). "
+                "Set the connector's URL (e.g. GITHUB_API_URL / BITBUCKET_BASE_URL)."
+            )
         last_exc: Exception | None = None
         for attempt in range(self.max_retries):
             try:
                 resp = self.session.request(method, url, timeout=self.timeout, **kwargs)
                 if resp.status_code in (429, 500, 502, 503, 504):
-                    delay = float(resp.headers.get("Retry-After", 2**attempt))
-                    time.sleep(min(delay, 30))
+                    # Transient — back off and retry.
+                    last_exc = RuntimeError(f"{resp.status_code} {resp.reason}")
+                    time.sleep(min(float(resp.headers.get("Retry-After", 2**attempt)), 30))
                     continue
-                resp.raise_for_status()
+                if resp.status_code >= 400:
+                    # Client error (401/403/404/…) — not retryable. Fail fast with
+                    # the real reason instead of an opaque "failed after N attempts".
+                    detail = " ".join((resp.text or "").split())[:200]
+                    raise RuntimeError(
+                        f"{method} {url} -> {resp.status_code} {resp.reason}"
+                        + (f": {detail}" if detail else "")
+                    )
                 return resp
             except requests.RequestException as exc:  # network-level failure
                 last_exc = exc
                 time.sleep(2**attempt)
-        raise RuntimeError(f"{method} {url} failed after {self.max_retries} attempts") from last_exc
+        raise RuntimeError(f"{method} {url} failed after {self.max_retries} attempts ({last_exc})")

@@ -153,9 +153,15 @@ codescan serve --ai            # enable AI exploitability/chaining (needs ANTHRO
 codescan serve --live          # scan Bitbucket/Snyk/Xray instead of fixtures
 ```
 
-The dashboard shows the ServiceNow VR queue (findings ranked by composite risk),
-with filters (search, severity, state, repo, min risk) and signal badges (KEV,
-attack-chain membership, EPSS, reporting scanners). **Run scans from the UI**
+The UI is a complete usage surface — no CLI needed. It opens on an **Overview**
+landing page: run status (source, mode, last run), key metrics, a severity
+breakdown, quick actions, an in-app usage guide, and **Download JSON / CSV**
+buttons for the ServiceNow import (`GET /api/export`). The other tabs:
+
+The **Findings** dashboard shows the ServiceNow VR queue (findings ranked by
+composite risk), with filters (search, severity, state, repo, min risk) and
+signal badges (KEV, attack-chain membership, EPSS, reporting scanners).
+**Run scans from the UI**
 with the header's **Run scan** button and the **AI / offline / live** toggles —
 including on-demand **live** scans of Bitbucket/Snyk/Xray. A "last run" chip
 shows when it last ran; a failed run (e.g. live mode without credentials) keeps
@@ -172,10 +178,12 @@ A **Threats** tab shows the per-service **STRIDE threat models** (see below):
 threats linked to their findings and chains, assets, entry points, trust
 boundaries, posture, and recommendations.
 
-A **Config** tab manages non-secret settings live: the default AI tier, per-task
+A **Config** tab manages non-secret settings live: the **repo source**
+(Bitbucket/GitHub) and **GitHub repo/org targets**, the default AI tier, per-task
 model routing, enrichment toggles, the threat-modeling toggle, scoring weights,
-and the ServiceNow push flag. Secrets stay in the environment (shown masked,
-read-only). Edits apply to the next scan and persist to `config.overrides.json`.
+and the ServiceNow push flag/format. Secrets stay in the environment (shown
+masked, read-only). Edits apply to the next scan and persist to
+`config.overrides.json`.
 
 Backend is FastAPI (`web.py`); the frontend is a single dependency-free HTML page
 (`static/index.html`) that talks to the same pipeline.
@@ -205,7 +213,26 @@ codescan scan --config config/config.example.yaml
 Flags: `--no-ai` (deterministic only), `--offline` (skip KEV/EPSS network calls),
 `--out` (ServiceNow import path), `--state` (validation-state store path),
 `--sn-format json|csv` (write a CSV for ServiceNow CSV Import Sets instead of
-JSON — also settable in config/UI).
+JSON — also settable in config/UI), `--repo owner/name` (scan specific GitHub
+repo(s); implies GitHub source + a live scan; repeatable).
+
+Scan a specific GitHub repo:
+
+```bash
+export GITHUB_TOKEN=ghp_...          # repo read access
+export SNYK_TOKEN=… SNYK_ORG_ID=… XRAY_TOKEN=… XRAY_BASE_URL=…   # findings source
+export ANTHROPIC_API_KEY=…           # only if AI stages are enabled
+codescan scan --repo acme/checkout   # or several: --repo a/b --repo c/d
+```
+
+> codescan uses GitHub for the **repo inventory** (the scan surface) — the actual
+> vulnerability **findings come from Snyk and Xray**. A repo that Snyk/Xray
+> haven't scanned yet appears in the inventory with zero findings; codescan does
+> not run SAST/SCA on the code itself.
+
+You can also set the target repos without the CLI: in the **Config** tab, pick
+`github` as the repo source and enter `owner/name` repos in **GitHub repos**,
+then tick **live** and **Run scan** from the header.
 
 Inspect a produced import file:
 

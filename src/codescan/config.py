@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 _ENV_PATTERN = re.compile(r"\$\{([^}]+)\}")
 
@@ -53,8 +53,17 @@ class BitbucketConfig(BaseModel):
 class GitHubConfig(BaseModel):
     api_url: str = "https://api.github.com"   # or GHES: https://ghe.internal/api/v3
     token: str = ""
-    orgs: list[str] = []                      # empty = all repos the token can see
-    verify_tls: bool = True
+    # Target scope, most specific first:
+    repos: list[str] = []                     # explicit "owner/name" repos
+    orgs: list[str] = []                      # whole orgs (used when repos is empty)
+    verify_tls: bool = True                   # empty repos+orgs = all the token can see
+
+    @field_validator("api_url")
+    @classmethod
+    def _default_api_url(cls, v: str) -> str:
+        # An unset ${GITHUB_API_URL} interpolates to "" — fall back to public GitHub
+        # so github.com users don't have to set it. GHES users provide their host.
+        return v.strip() or "https://api.github.com"
 
 
 class SourceConfig(BaseModel):
@@ -74,6 +83,14 @@ class XrayConfig(BaseModel):
     base_url: str = ""
     token: str = ""
     verify_tls: bool = True
+
+
+class OpenHackConfig(BaseModel):
+    """Ingest Hadrian OpenHack whitebox-review findings from a run directory."""
+
+    enabled: bool = False
+    findings_dir: str = ""      # OpenHack run dir, or its finding-candidates/ folder
+    repo: str = ""              # repo the findings belong to; empty = first scanned repo
 
 
 class ServiceNowConfig(BaseModel):
@@ -119,6 +136,7 @@ class Config(BaseModel):
     github: GitHubConfig = GitHubConfig()
     snyk: SnykConfig = SnykConfig()
     xray: XrayConfig = XrayConfig()
+    openhack: OpenHackConfig = OpenHackConfig()
     servicenow: ServiceNowConfig = ServiceNowConfig()
     enrichment: EnrichmentConfig = EnrichmentConfig()
     threat_model: ThreatModelConfig = ThreatModelConfig()

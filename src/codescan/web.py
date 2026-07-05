@@ -17,13 +17,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
 from .config import Config, TaskModel
 from .models import SERVICENOW_STATE, Finding, ValidationState
 from .pipeline import Pipeline, PipelineResult
-from .servicenow import ServiceNowExporter
+from .servicenow import ServiceNowExporter, items_to_csv
 from .validation import StateStore
 
 STATIC = Path(__file__).parent / "static"
@@ -73,7 +73,11 @@ def sanitized_config(cfg: Config) -> dict:
             "format": cfg.servicenow.format,
             "password": _mask(cfg.servicenow.password),
         },
-        "source": {"provider": cfg.source.provider},
+        "source": {
+            "provider": cfg.source.provider,
+            "github_repos": cfg.github.repos,
+            "github_orgs": cfg.github.orgs,
+        },
         "connectors": {
             "bitbucket": {"base_url": cfg.bitbucket.base_url, "token": _mask(cfg.bitbucket.token)},
             "github": {"api_url": cfg.github.api_url, "token": _mask(cfg.github.token)},
@@ -126,11 +130,16 @@ def apply_config(cfg: Config, update: dict) -> None:
     if "enabled" in update.get("threat_model", {}):
         cfg.threat_model.enabled = bool(update["threat_model"]["enabled"])
 
-    if "provider" in update.get("source", {}):
-        provider = str(update["source"]["provider"]).lower()
+    src = update.get("source", {})
+    if "provider" in src:
+        provider = str(src["provider"]).lower()
         if provider not in SCM_PROVIDERS:
             raise ValueError(f"source.provider must be one of {SCM_PROVIDERS}")
         cfg.source.provider = provider
+    if "github_repos" in src:
+        cfg.github.repos = [str(r).strip() for r in src["github_repos"] if str(r).strip()]
+    if "github_orgs" in src:
+        cfg.github.orgs = [str(o).strip() for o in src["github_orgs"] if str(o).strip()]
 
     sn = update.get("servicenow", {})
     if "push" in sn:
@@ -280,7 +289,10 @@ def _payload(state: AppState) -> dict:
         "chains": r.chains,
         "threat_models": [tm.model_dump() for tm in r.threat_models],
         "states": [s.value for s in ValidationState],
-        "mode": {"use_ai": state.use_ai, "offline": state.offline, "live": state.live},
+        "mode": {
+            "use_ai": state.use_ai, "offline": state.offline, "live": state.live,
+            "source": state.cfg.source.provider,
+        },
         "last_scan": state.last_scan,
         "startup_error": state.startup_error,
     }
@@ -336,6 +348,20 @@ def create_app(
     @app.get("/api/servicenow")
     def servicenow() -> dict:
         return {"records": state.servicenow_items()}
+
+    @app.get("/api/export")
+    def export_file(format: str = "json") -> Response:
+        """Download the ServiceNow import as a JSON or CSV attachment."""
+        items = state.servicenow_items()
+        if format.lower() == "csv":
+            return Response(
+                content=items_to_csv(items), media_type="text/csv",
+                headers={"Content-Disposition": "attachment; filename=servicenow_import.csv"},
+            )
+        return Response(
+            content=json.dumps({"records": items}, indent=2), media_type="application/json",
+            headers={"Content-Disposition": "attachment; filename=servicenow_import.json"},
+        )
 
     @app.get("/api/config")
     def get_config() -> dict:

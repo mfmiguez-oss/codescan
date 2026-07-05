@@ -39,9 +39,10 @@ github:
   # github.com, or GitHub Enterprise Server: https://ghe.internal/api/v3
   api_url: ${GITHUB_API_URL}
   token: ${GITHUB_TOKEN}
-  # Organizations to enumerate. Empty = all repos the token can see.
-  orgs: []               # e.g. ["acme-payments", "acme-platform"]
-  verify_tls: true
+  # Target scope, most specific first. Set `repos` to scan only those.
+  repos: []              # e.g. ["acme/checkout"] — specific "owner/name" repos
+  orgs: []               # whole orgs (used when repos is empty)
+  verify_tls: true       # empty repos+orgs = all repos the token can see
 
 snyk:
   api_url: ${SNYK_API_URL}

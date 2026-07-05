@@ -323,8 +323,12 @@ format is settable in config, the config UI, or with `--sn-format` on the CLI.
 FastAPI backend holding the latest `PipelineResult` in memory; a single
 dependency-free HTML page for the frontend. Endpoints: `GET /api/state`,
 `POST /api/scan`, `POST /api/findings/{id}/state`, `GET /api/servicenow`, and
-`GET`/`POST /api/config`. Three views:
+`GET`/`POST /api/config`, and `GET /api/export` (JSON/CSV download). Four views:
 
+- **Overview** — the landing page: run status (source, mode, last run), key
+  metrics, a severity breakdown, quick actions (run, download JSON/CSV, jump to
+  a tab), and an in-app usage guide. Makes the UI a complete usage surface — no
+  CLI required.
 - **Findings** — the triage queue with filters, signal badges, a per-finding
   detail drawer (CVSS vector, EPSS, reachability, provenance, rationale,
   remediation, tags, threats, chains), and inline validation-state editing that
@@ -332,8 +336,9 @@ dependency-free HTML page for the frontend. Endpoints: `GET /api/state`,
 - **Threats** — the per-service threat models (§5.10): STRIDE threats with
   linked findings/chains, assets, entry points, trust boundaries, posture, and
   recommendations.
-- **Config** — edit non-secret settings live: default AI tier, per-task model
-  routing, enrichment toggles, scoring weights, and the ServiceNow push flag.
+- **Config** — edit non-secret settings live: the repo source (Bitbucket/GitHub)
+  and GitHub repo/org targets, default AI tier, per-task model routing,
+  enrichment toggles, scoring weights, and the ServiceNow push flag/format.
   Secrets are shown masked and read-only (they stay in the environment). Edits
   apply to the next scan and persist to `config.overrides.json`, layered over
   the base config on restart. `POST` is validated server-side and rejected with

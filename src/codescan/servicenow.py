@@ -13,6 +13,7 @@ stay closed (see the sticky states in `validation.py`).
 from __future__ import annotations
 
 import csv
+import io
 import json
 from pathlib import Path
 
@@ -119,17 +120,21 @@ class ServiceNowExporter:
 
     @staticmethod
     def _write_csv(items: list[dict], path: Path) -> None:
-        if not items:
-            path.write_text("", encoding="utf-8")
-            return
-        # Every record shares the same keys (built by to_vulnerable_item).
-        fieldnames = list(items[0].keys())
-        with open(path, "w", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
-            writer.writeheader()
-            for item in items:
-                # csv quotes multi-line work_notes; normalize None -> "".
-                writer.writerow({k: ("" if v is None else v) for k, v in item.items()})
+        path.write_text(items_to_csv(items), encoding="utf-8")
+
+
+def items_to_csv(items: list[dict]) -> str:
+    """Render vulnerable-item records as CSV (multi-line work notes are quoted)."""
+    if not items:
+        return ""
+    # Every record shares the same keys (built by to_vulnerable_item).
+    fieldnames = list(items[0].keys())
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for item in items:
+        writer.writerow({k: ("" if v is None else v) for k, v in item.items()})
+    return buf.getvalue()
 
     def _push(self, items: list[dict]) -> None:
         """POST each record into the configured import table (Table API)."""

@@ -106,6 +106,22 @@ def test_servicenow_endpoint(tmp_path):
     assert all(rec["correlation_id"] for rec in records)
 
 
+def test_export_json_download(tmp_path):
+    r = _client(tmp_path).get("/api/export?format=json")
+    assert r.status_code == 200
+    assert "attachment" in r.headers["content-disposition"]
+    assert "servicenow_import.json" in r.headers["content-disposition"]
+    assert "records" in r.json()
+
+
+def test_export_csv_download(tmp_path):
+    r = _client(tmp_path).get("/api/export?format=csv")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/csv")
+    assert "servicenow_import.csv" in r.headers["content-disposition"]
+    assert "correlation_id" in r.text.splitlines()[0]
+
+
 def test_get_config_masks_secrets(tmp_path):
     body = _client(tmp_path).get("/api/config").json()
     assert body["options"]["known_models"] and body["options"]["routed_tasks"]
@@ -140,14 +156,34 @@ def test_invalid_effort_rejected(tmp_path):
 def test_source_provider_config(tmp_path):
     client = _client(tmp_path)
     body = client.get("/api/config").json()
-    assert body["source"]["provider"] == "bitbucket"
+    assert body["source"]["provider"] in ("bitbucket", "github")
     assert "github" in body["connectors"]
     assert body["options"]["scm_providers"] == ["bitbucket", "github"]
 
-    switched = client.post("/api/config", json={"source": {"provider": "github"}}).json()
-    assert switched["source"]["provider"] == "github"
+    for provider in ("bitbucket", "github"):
+        switched = client.post("/api/config", json={"source": {"provider": provider}}).json()
+        assert switched["source"]["provider"] == provider
     # Unknown provider is rejected.
     assert client.post("/api/config", json={"source": {"provider": "gitlab"}}).status_code == 400
+
+
+def test_github_repos_editable_via_config(tmp_path):
+    client = _client(tmp_path)
+    body = client.post("/api/config", json={
+        "source": {"provider": "github", "github_repos": ["acme/checkout", " ", "acme/gateway"]},
+    }).json()
+    # Blanks are stripped; the list round-trips.
+    assert body["source"]["github_repos"] == ["acme/checkout", "acme/gateway"]
+
+    # It reaches the connector: a live scan would target exactly those repos.
+    from codescan.web import create_app  # persisted to overrides -> new app picks it up
+    cfg_path = str(ROOT / "config" / "config.example.yaml")
+    app2 = create_app(config_path=cfg_path, fixtures=str(ROOT / "fixtures"),
+                      overrides_path=str(tmp_path / "overrides.json"),
+                      out_path=str(tmp_path / "o.json"), state_path=str(tmp_path / "s.json"))
+    from fastapi.testclient import TestClient
+    reran = TestClient(app2).get("/api/config").json()
+    assert reran["source"]["github_repos"] == ["acme/checkout", "acme/gateway"]
 
 
 def test_servicenow_format_config(tmp_path):
