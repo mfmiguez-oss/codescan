@@ -160,7 +160,22 @@ paging). Each connector has **two ingestion paths**:
 - `from_file()` — load a native scanner export (Snyk `--json`, Xray violations).
 
 The offline path is not just for demos: it makes the whole pipeline runnable in
-CI, in tests, and against archived scan data with zero credentials. Fixtures
+CI, in tests, and against archived scan data with zero credentials.
+
+**Findings sources are also pluggable.** Beyond Snyk/Xray (SCA/CVE), a third
+source — Hadrian **OpenHack** (`connectors/openhack.py`) — ingests whitebox
+source-review findings from an OpenHack run directory (`finding-candidates/*.json`).
+These are first-party source issues with no CVE (dedup keys on title + path);
+they carry severity, target path, description, remediation, and OWASP/CWE-class
+tags, and flow through the same normalize → dedup → score → triage path. This
+gives codescan findings for repos the SCA/CVE scanners never covered.
+codescan can either **ingest** an existing OpenHack run directory, or
+**auto-invoke** OpenHack during a live scan (`openhack_runner.py`): with
+`openhack.auto`, it clones the target repo and runs a configured `command`
+(`{repo_path}`/`{output_dir}` substituted, AI-provider env passed through), then
+ingests the output. The command is configurable because OpenHack is a multi-phase
+agentic tool with its own LLM setup — codescan drives the invocation and reads
+the result rather than reimplementing OpenHack's loop. Fixtures
 under `fixtures/` drive the default UI and the test suite.
 
 **Repo source is pluggable.** The repo inventory comes from either Bitbucket
@@ -238,10 +253,17 @@ Design points:
 - **Chains are cross-finding objects** and are returned separately (attached to
   findings by ID), not stored on any single finding.
 
-### 5.5 Model routing (`llm.py`)
+### 5.5 Model routing + multi-provider harness (`llm.py`, `providers/`)
 
-Different tasks need different intelligence tiers. `ModelRouter` resolves a task
-name to a `ModelSpec(model, effort, max_tokens)`:
+Every AI stage runs through a **provider harness** (`providers/`): each supplier
+— `anthropic` (native structured outputs, adaptive thinking, effort, Fable
+fallbacks), `openai` (and any OpenAI-compatible endpoint via `OPENAI_BASE_URL`),
+`google` (Gemini) — implements the same `complete_json(request) -> dict`
+contract. Non-Anthropic SDKs are imported lazily, so they're optional deps.
+`ModelRouter` resolves a task to a `ModelSpec(provider, model, effort,
+max_tokens)`, and `LLMClient` dispatches to the resolved supplier via the
+registry — so a task can run on any model from any supplier, set in config.
+Different tasks need different intelligence tiers:
 
 | Task | Default tier | Rationale |
 |---|---|---|

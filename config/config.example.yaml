@@ -2,11 +2,14 @@
 
 ai:
   # Default tier — used by any AI task without a more specific override below.
+  # provider selects the supplier (multi-provider harness): anthropic | openai |
+  # google. `openai` also covers any OpenAI-compatible endpoint via OPENAI_BASE_URL.
+  provider: anthropic
   # Set to claude-fable-5 for the hardest analysis (the client auto-enables
   # refusal fallbacks on Fable since security tooling can trip false-positive
   # classifier refusals).
   model: claude-opus-4-8
-  effort: high            # low | medium | high | xhigh | max
+  effort: high            # low | medium | high | xhigh | max (Anthropic; ignored elsewhere)
   max_tokens: 32000
 
   # Per-task model routing: cheap models for mechanical work, deep models for
@@ -21,6 +24,11 @@ ai:
       effort: xhigh
       # For the deepest chaining analysis, use:
       # model: claude-fable-5
+      # Or route this task to a different supplier entirely:
+      # provider: openai
+      # model: gpt-5
+      # provider: google
+      # model: gemini-2.5-pro
     enrichment:           # AI remediation guidance + tags (cheap, mechanical)
       model: claude-haiku-4-5
 
@@ -54,6 +62,21 @@ xray:
   base_url: ${XRAY_BASE_URL}
   token: ${XRAY_TOKEN}
   verify_tls: true
+
+# Hadrian OpenHack whitebox-review findings (https://github.com/hadriansecurity/openhack).
+# Run OpenHack on the repo first, then point codescan at the run's output. Covers
+# repos that Snyk/Xray haven't scanned. Also settable in the config UI.
+openhack:
+  enabled: false         # ingest findings from findings_dir
+  findings_dir: ""       # e.g. runs/<target>/<run-id>  (or its finding-candidates/ dir)
+  repo: ""               # owner/name — empty = the first scanned repo
+  # Or have codescan invoke OpenHack automatically during a live scan, then
+  # ingest its output. `command` runs OpenHack for the repo; {repo_path} and
+  # {output_dir} are substituted, and the AI-provider env vars are passed through.
+  auto: false
+  clone: true            # git clone the target repo first
+  workspace: .openhack   # where to clone / run
+  command: []            # e.g. ["bash", "run_openhack.sh", "{repo_path}", "{output_dir}"]
 
 servicenow:
   instance: ${SERVICENOW_INSTANCE}

@@ -13,6 +13,7 @@ via POST /api/scan.
 from __future__ import annotations
 
 import json
+import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from pydantic import BaseModel
 from .config import Config, TaskModel
 from .models import SERVICENOW_STATE, Finding, ValidationState
 from .pipeline import Pipeline, PipelineResult
+from .providers import PROVIDERS
 from .servicenow import ServiceNowExporter, items_to_csv
 from .validation import StateStore
 
@@ -46,11 +48,13 @@ def sanitized_config(cfg: Config) -> dict:
     """Config for the UI — editable settings plus masked, read-only secrets."""
     return {
         "ai": {
+            "provider": cfg.ai.provider,
             "model": cfg.ai.model,
             "effort": cfg.ai.effort,
             "max_tokens": cfg.ai.max_tokens,
             "tasks": {
                 name: {
+                    "provider": (t.provider or ""),
                     "model": (t.model or ""),
                     "effort": (t.effort or ""),
                     "max_tokens": t.max_tokens,
@@ -66,6 +70,15 @@ def sanitized_config(cfg: Config) -> dict:
             "ai_enabled": cfg.enrichment.ai_enabled,
         },
         "threat_model": {"enabled": cfg.threat_model.enabled},
+        "openhack": {
+            "enabled": cfg.openhack.enabled,
+            "findings_dir": cfg.openhack.findings_dir,
+            "repo": cfg.openhack.repo,
+            "auto": cfg.openhack.auto,
+            "command": " ".join(cfg.openhack.command),
+            "workspace": cfg.openhack.workspace,
+            "clone": cfg.openhack.clone,
+        },
         "servicenow": {
             "instance": cfg.servicenow.instance,
             "push": cfg.servicenow.push,
@@ -87,6 +100,7 @@ def sanitized_config(cfg: Config) -> dict:
         "options": {
             "known_models": KNOWN_MODELS, "efforts": EFFORTS,
             "routed_tasks": ROUTED_TASKS, "scm_providers": SCM_PROVIDERS,
+            "ai_providers": PROVIDERS,
         },
     }
 
@@ -98,6 +112,8 @@ def apply_config(cfg: Config, update: dict) -> None:
     Raises ValueError on invalid input.
     """
     ai = update.get("ai", {})
+    if ai.get("provider"):
+        cfg.ai.provider = _valid_provider(ai["provider"])
     if "model" in ai and ai["model"]:
         cfg.ai.model = str(ai["model"])
     if ai.get("effort"):
@@ -107,11 +123,12 @@ def apply_config(cfg: Config, update: dict) -> None:
     if "tasks" in ai:
         for name, t in ai["tasks"].items():
             spec = TaskModel(
+                provider=(_valid_provider(t["provider"]) if t.get("provider") else None),
                 model=(t.get("model") or None),
                 effort=(_valid_effort(t["effort"]) if t.get("effort") else None),
                 max_tokens=(int(t["max_tokens"]) if t.get("max_tokens") else None),
             )
-            if spec.model or spec.effort or spec.max_tokens:
+            if spec.provider or spec.model or spec.effort or spec.max_tokens:
                 cfg.ai.tasks[name] = spec
             else:
                 cfg.ai.tasks.pop(name, None)
@@ -129,6 +146,23 @@ def apply_config(cfg: Config, update: dict) -> None:
 
     if "enabled" in update.get("threat_model", {}):
         cfg.threat_model.enabled = bool(update["threat_model"]["enabled"])
+
+    oh = update.get("openhack", {})
+    if "enabled" in oh:
+        cfg.openhack.enabled = bool(oh["enabled"])
+    if "findings_dir" in oh:
+        cfg.openhack.findings_dir = str(oh["findings_dir"]).strip()
+    if "repo" in oh:
+        cfg.openhack.repo = str(oh["repo"]).strip()
+    if "auto" in oh:
+        cfg.openhack.auto = bool(oh["auto"])
+    if "command" in oh:
+        cmd = oh["command"]
+        cfg.openhack.command = cmd if isinstance(cmd, list) else shlex.split(cmd or "")
+    if "workspace" in oh:
+        cfg.openhack.workspace = str(oh["workspace"]).strip() or ".openhack"
+    if "clone" in oh:
+        cfg.openhack.clone = bool(oh["clone"])
 
     src = update.get("source", {})
     if "provider" in src:
@@ -154,6 +188,12 @@ def apply_config(cfg: Config, update: dict) -> None:
 def _valid_effort(v: str) -> str:
     if v not in EFFORTS:
         raise ValueError(f"invalid effort: {v}")
+    return v
+
+
+def _valid_provider(v: str) -> str:
+    if v not in PROVIDERS:
+        raise ValueError(f"invalid AI provider: {v} (known: {PROVIDERS})")
     return v
 
 

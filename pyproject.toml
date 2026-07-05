@@ -16,6 +16,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.5", "httpx>=0.27"]
+# Extra AI suppliers for the multi-provider harness (Anthropic is a core dep).
+providers = ["openai>=1.40", "google-genai>=0.3"]
 
 [project.scripts]
 codescan = "codescan.cli:app"

@@ -74,5 +74,5 @@ class OpenHackConnector:
             location=Location(repo=repo, path=path),
             description=desc,
             remediation=f.get("recommended_fix", ""),
-            tags=[t for t in ["openhack", vclass, expert] if t],
+            tags=list(dict.fromkeys(t for t in ["openhack", vclass, expert] if t)),
         )

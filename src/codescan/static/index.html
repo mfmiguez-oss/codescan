@@ -87,6 +87,9 @@
   .formrow.ro span { color: var(--txt); }
   .grid3 { display: grid; grid-template-columns: 130px repeat(3, 1fr); gap: 8px 10px; align-items: center; }
   .grid3 .h { color: var(--muted); font-size: 12px; }
+  .grid5 { display: grid; grid-template-columns: 110px 1fr 1.5fr 1fr 1fr; gap: 8px 10px; align-items: center; }
+  .grid5 .h { color: var(--muted); font-size: 12px; }
+  .grid5 input { width: 100%; }
   .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
            background: #1e293b; border: 1px solid var(--accent); color: #fff; padding: 10px 18px;
            border-radius: 8px; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 30; }
@@ -542,15 +545,16 @@ function splitList(v) {
   return (v || '').split(/[\s,]+/).map(x => x.trim()).filter(Boolean);
 }
 function renderConfig() {
-  const c = CONFIG, M = c.options.known_models, E = c.options.efforts;
+  const c = CONFIG, M = c.options.known_models, E = c.options.efforts, P = c.options.ai_providers;
   const w = c.scoring.weights, en = c.enrichment, sn = c.servicenow, cn = c.connectors;
   const chk = (id, v) => `<input type="checkbox" id="${id}" ${v ? 'checked' : ''}/>`;
   const wnum = (id, v) => `<input type="number" step="0.05" id="${id}" value="${v}"/>`;
   const tasksHtml = c.options.routed_tasks.map(t => {
     const tc = c.ai.tasks[t] || {};
-    return `<div class="grid3" style="margin:6px 0">
+    return `<div class="grid5" style="margin:6px 0">
       <div style="font-weight:600">${t}</div>
-      ${sel(`task-${t}-model`, M, tc.model || '', '(default)')}
+      ${sel(`task-${t}-provider`, P, tc.provider || '', '(inherit)')}
+      <input type="text" id="task-${t}-model" value="${esc(tc.model || '')}" placeholder="(default)"/>
       ${sel(`task-${t}-effort`, E, tc.effort || '', '(inherit)')}
       <input type="number" id="task-${t}-max" value="${tc.max_tokens ?? ''}" placeholder="inherit"/>
     </div>`;
@@ -559,15 +563,16 @@ function renderConfig() {
   $('#configView').innerHTML = `
     <div class="card">
       <h4>AI — default tier</h4>
-      <p class="hint">Used by any AI task without a specific route below.</p>
-      <div class="formrow"><label>Model</label>${sel('ai-model', M, c.ai.model)}</div>
+      <p class="hint">Used by any AI task without a specific route below. Provider + model can come from any supplier (Anthropic / OpenAI / Google).</p>
+      <div class="formrow"><label>Provider</label>${sel('ai-provider', P, c.ai.provider)}</div>
+      <div class="formrow"><label>Model</label><input type="text" id="ai-model" style="width:260px" value="${esc(c.ai.model)}"/></div>
       <div class="formrow"><label>Effort</label>${sel('ai-effort', E, c.ai.effort)}</div>
       <div class="formrow"><label>Max tokens</label><input type="number" id="ai-max" value="${c.ai.max_tokens}"/></div>
     </div>
     <div class="card">
       <h4>Model routing by task</h4>
-      <p class="hint">Cheap models for mechanical work (dedup, enrichment), deep models for reasoning (exploitability). Blank inherits the default tier.</p>
-      <div class="grid3"><div class="h">Task</div><div class="h">Model</div><div class="h">Effort</div><div class="h">Max tokens</div></div>
+      <p class="hint">Route each task to any provider + model. Cheap models for mechanical work (dedup, enrichment), deep models for reasoning (exploitability, threat_model). Blank inherits the default tier. Effort applies to Anthropic; other providers ignore it.</p>
+      <div class="grid5"><div class="h">Task</div><div class="h">Provider</div><div class="h">Model</div><div class="h">Effort</div><div class="h">Max tokens</div></div>
       ${tasksHtml}
     </div>
     <div class="card">
@@ -582,6 +587,17 @@ function renderConfig() {
       <h4>Threat modeling</h4>
       <p class="hint">Per-service STRIDE threat model (deep tier). An extra AI call per service — route it via the "threat_model" row above. Needs AI enabled on the scan.</p>
       <div class="formrow"><label>Enable threat modeling</label><input type="checkbox" id="tm-enabled" ${c.threat_model.enabled ? 'checked' : ''}/></div>
+    </div>
+    <div class="card">
+      <h4>OpenHack (whitebox findings)</h4>
+      <p class="hint">Ingest <a href="https://github.com/hadriansecurity/openhack" target="_blank" rel="noopener">Hadrian OpenHack</a> review findings from a run directory (finding-candidates JSON). Covers repos Snyk/Xray haven't scanned.</p>
+      <div class="formrow"><label>Enable OpenHack</label><input type="checkbox" id="oh-enabled" ${c.openhack.enabled ? 'checked' : ''}/> <span class="muted" style="font-size:12px">ingest findings from a run dir</span></div>
+      <div class="formrow"><label>Findings dir</label><input type="text" id="oh-dir" style="width:360px" value="${esc(c.openhack.findings_dir || '')}" placeholder="path to OpenHack run dir or finding-candidates/"/></div>
+      <div class="formrow"><label>Repo</label><input type="text" id="oh-repo" style="width:360px" value="${esc(c.openhack.repo || '')}" placeholder="owner/name — empty = first scanned repo"/></div>
+      <div class="formrow"><label>Auto-run</label><input type="checkbox" id="oh-auto" ${c.openhack.auto ? 'checked' : ''}/> <span class="muted" style="font-size:12px">run OpenHack during a live scan, then ingest</span></div>
+      <div class="formrow"><label>Command</label><input type="text" id="oh-cmd" style="width:420px" value="${esc(c.openhack.command || '')}" placeholder="bash run_openhack.sh {repo_path} {output_dir}"/></div>
+      <div class="formrow"><label>Workspace</label><input type="text" id="oh-ws" style="width:260px" value="${esc(c.openhack.workspace || '')}" placeholder=".openhack"/></div>
+      <div class="formrow"><label>Clone repo first</label><input type="checkbox" id="oh-clone" ${c.openhack.clone ? 'checked' : ''}/></div>
     </div>
     <div class="card">
       <h4>Scoring weights</h4>
@@ -623,12 +639,13 @@ async function saveConfig() {
   const numOrNull = id => { const v = $('#' + id).value.trim(); return v === '' ? null : Number(v); };
   const tasks = {};
   CONFIG.options.routed_tasks.forEach(t => {
-    tasks[t] = { model: $('#task-' + t + '-model').value, effort: $('#task-' + t + '-effort').value, max_tokens: numOrNull('task-' + t + '-max') };
+    tasks[t] = { provider: $('#task-' + t + '-provider').value, model: $('#task-' + t + '-model').value, effort: $('#task-' + t + '-effort').value, max_tokens: numOrNull('task-' + t + '-max') };
   });
   const update = {
-    ai: { model: $('#ai-model').value, effort: $('#ai-effort').value, max_tokens: Number($('#ai-max').value), tasks },
+    ai: { provider: $('#ai-provider').value, model: $('#ai-model').value, effort: $('#ai-effort').value, max_tokens: Number($('#ai-max').value), tasks },
     enrichment: { kev_enabled: $('#en-kev').checked, epss_enabled: $('#en-epss').checked, reachability_enabled: $('#en-reach').checked, ai_enabled: $('#en-ai').checked },
     threat_model: { enabled: $('#tm-enabled').checked },
+    openhack: { enabled: $('#oh-enabled').checked, findings_dir: $('#oh-dir').value, repo: $('#oh-repo').value, auto: $('#oh-auto').checked, command: $('#oh-cmd').value, workspace: $('#oh-ws').value, clone: $('#oh-clone').checked },
     source: { provider: $('#scm-provider').value, github_repos: splitList($('#gh-repos').value), github_orgs: splitList($('#gh-orgs').value) },
     scoring: { weights: { severity: Number($('#w-sev').value), exploitability: Number($('#w-exp').value), exposure: Number($('#w-exposure').value), chaining: Number($('#w-chain').value) }, kev_floor: Number($('#kev-floor').value) },
     servicenow: { push: $('#sn-push').checked, format: $('#sn-format').value },

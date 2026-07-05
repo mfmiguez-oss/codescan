@@ -38,9 +38,22 @@ def test_cross_scanner_dedup(tmp_path):
 
 def test_finding_count(tmp_path):
     result = _run(tmp_path)
-    # 5 raw findings (2 snyk + 2 xray in PAY, 1 snyk in PLATFORM),
-    # Log4Shell collapses -> 4 unique.
-    assert len(result.findings) == 4
+    # 5 scanner findings (2 snyk + 2 xray in PAY, 1 snyk in PLATFORM) with
+    # Log4Shell collapsing -> 4 unique, plus 2 OpenHack whitebox findings -> 6.
+    assert len(result.findings) == 6
+
+
+def test_openhack_findings_ingested(tmp_path):
+    result = _run(tmp_path)
+    from codescan.models import Source
+    oh = [f for f in result.findings if Source.openhack in f.merged_sources]
+    assert len(oh) == 2
+    titles = {f.title for f in oh}
+    assert "SQL injection in order lookup" in titles
+    # No CVE, but carries remediation + tags from OpenHack.
+    sqli = next(f for f in oh if f.title.startswith("SQL injection"))
+    assert sqli.cve_ids == [] and sqli.remediation
+    assert "openhack" in sqli.tags and "injection" in sqli.tags
 
 
 def test_reachability_scoring(tmp_path):

@@ -43,7 +43,7 @@ def test_state_endpoint(tmp_path):
     r = _client(tmp_path).get("/api/state")
     assert r.status_code == 200
     body = r.json()
-    assert body["summary"]["findings"] == 4
+    assert body["summary"]["findings"] == 6
     # Findings come back highest-risk first for the triage queue.
     scores = [f["risk_score"] for f in body["findings"]]
     assert scores == sorted(scores, reverse=True)
@@ -102,7 +102,7 @@ def test_servicenow_endpoint(tmp_path):
     r = _client(tmp_path).get("/api/servicenow")
     assert r.status_code == 200
     records = r.json()["records"]
-    assert len(records) == 4
+    assert len(records) == 6
     assert all(rec["correlation_id"] for rec in records)
 
 
@@ -184,6 +184,38 @@ def test_github_repos_editable_via_config(tmp_path):
     from fastapi.testclient import TestClient
     reran = TestClient(app2).get("/api/config").json()
     assert reran["source"]["github_repos"] == ["acme/checkout", "acme/gateway"]
+
+
+def test_openhack_config(tmp_path):
+    client = _client(tmp_path)
+    body = client.post("/api/config", json={
+        "openhack": {
+            "enabled": True, "findings_dir": "runs/x/1", "repo": "acme/checkout",
+            "auto": True, "command": "bash run.sh {repo_path} {output_dir}",
+            "workspace": ".oh", "clone": False,
+        },
+    }).json()
+    oh = body["openhack"]
+    assert oh["enabled"] is True and oh["auto"] is True and oh["clone"] is False
+    assert oh["repo"] == "acme/checkout" and oh["workspace"] == ".oh"
+    # Command round-trips (parsed to argv server-side, joined back for display).
+    assert oh["command"] == "bash run.sh {repo_path} {output_dir}"
+
+
+def test_ai_provider_config(tmp_path):
+    client = _client(tmp_path)
+    body = client.get("/api/config").json()
+    assert body["ai"]["provider"] == "anthropic"
+    assert body["options"]["ai_providers"] == ["anthropic", "openai", "google"]
+
+    updated = client.post("/api/config", json={
+        "ai": {"provider": "openai", "model": "gpt-5",
+               "tasks": {"exploitability": {"provider": "google", "model": "gemini-2.5-pro"}}},
+    }).json()
+    assert updated["ai"]["provider"] == "openai" and updated["ai"]["model"] == "gpt-5"
+    assert updated["ai"]["tasks"]["exploitability"]["provider"] == "google"
+    # Unknown provider rejected.
+    assert client.post("/api/config", json={"ai": {"provider": "acme"}}).status_code == 400
 
 
 def test_servicenow_format_config(tmp_path):

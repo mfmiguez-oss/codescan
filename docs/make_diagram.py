@@ -54,10 +54,11 @@ def main() -> None:
 
     # sources
     label(40, 92, "SOURCES")
-    box(ax, 110, 100, 180, 52, "SCM source", "Bitbucket / GitHub", IO)
-    box(ax, 410, 100, 180, 52, "Snyk", "SCA / SAST findings", IO)
-    box(ax, 710, 100, 180, 52, "JFrog Xray", "artifacts / CVEs", IO)
-    for sx in (200, 500, 800):
+    box(ax, 48, 100, 200, 52, "SCM source", "Bitbucket / GitHub", IO)
+    box(ax, 288, 100, 150, 52, "Snyk", "SCA / SAST", IO)
+    box(ax, 478, 100, 150, 52, "JFrog Xray", "artifacts / CVEs", IO)
+    box(ax, 668, 100, 220, 52, "OpenHack", "whitebox review", IO)
+    for sx in (148, 363, 553, 778):
         arrow(ax, (sx, 152), (sx, 196))
 
     # pipeline panel
@@ -108,7 +109,7 @@ def main() -> None:
     ax.text(64, 608, "Deterministic (no API key)", fontsize=10, va="center", color="#334155")
     ax.add_patch(FancyBboxPatch((420, 600), 16, 16, boxstyle="round,pad=0,rounding_size=3",
                                 facecolor="#e8f0ff", edgecolor="#3b6fe0", linewidth=1))
-    ax.text(444, 608, "AI stage (LLM) — optional, task-routed by tier", fontsize=10, va="center", color="#334155")
+    ax.text(444, 608, "AI stage (LLM) — routed by provider + tier (Anthropic / OpenAI / Google)", fontsize=10, va="center", color="#334155")
 
     out = Path(__file__).with_name("architecture.png")
     fig.savefig(out, dpi=200, bbox_inches="tight", facecolor="white")

@@ -28,6 +28,7 @@ def _interpolate(value: Any) -> Any:
 class TaskModel(BaseModel):
     """Per-task override of the default AI tier. Unset fields inherit."""
 
+    provider: str | None = None      # anthropic | openai | google
     model: str | None = None
     effort: str | None = None
     max_tokens: int | None = None
@@ -35,6 +36,7 @@ class TaskModel(BaseModel):
 
 class AIConfig(BaseModel):
     # Default tier — used by any task without a more specific override.
+    provider: str = "anthropic"      # anthropic | openai | google (per-supplier harness)
     model: str = "claude-opus-4-8"
     effort: str = "high"
     max_tokens: int = 32000
@@ -86,11 +88,18 @@ class XrayConfig(BaseModel):
 
 
 class OpenHackConfig(BaseModel):
-    """Ingest Hadrian OpenHack whitebox-review findings from a run directory."""
+    """Ingest Hadrian OpenHack whitebox-review findings — from an existing run
+    directory, or by invoking OpenHack automatically during a live scan."""
 
-    enabled: bool = False
+    enabled: bool = False       # ingest findings from `findings_dir`
     findings_dir: str = ""      # OpenHack run dir, or its finding-candidates/ folder
     repo: str = ""              # repo the findings belong to; empty = first scanned repo
+
+    # --- automatic invocation (during a live scan) ---
+    auto: bool = False          # run OpenHack, then ingest its output
+    command: list[str] = []     # command to run; {repo_path} and {output_dir} are substituted
+    workspace: str = ".openhack"  # dir to clone into and run under
+    clone: bool = True          # git clone the target repo before running
 
 
 class ServiceNowConfig(BaseModel):

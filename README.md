@@ -30,7 +30,7 @@ diagram is in [docs/architecture.svg](docs/architecture.svg) /
 | Requirement | Where it lives |
 |---|---|
 | Code in a local Bitbucket install | `connectors/bitbucket.py` — on-prem REST API builds the repo inventory (the scan surface). **GitHub/GHES** (`connectors/github.py`) is a selectable alternative via `source.provider`. |
-| Snyk + Xray available | `connectors/snyk.py`, `connectors/xray.py` — live API pull **or** offline export files, both normalized to one `Finding` model. |
+| Snyk + Xray available | `connectors/snyk.py`, `connectors/xray.py` — live API pull **or** offline export files, both normalized to one `Finding` model. Hadrian **OpenHack** (`connectors/openhack.py`) is a third, whitebox source-review findings source. |
 | Output ready for ServiceNow Vulnerabilities | `servicenow.py` — `sn_vul_vulnerable_item` records with risk score, state, and reasoning; idempotent via `correlation_id`. |
 | Validation states | `validation.py` + `models.py` — internal lifecycle (`new → under_investigation → confirmed / false_positive / risk_accepted / duplicate / resolved`) mapped to ServiceNow VR states, with a sticky **state store** so re-scans never re-open closed items. |
 | Deduplication | `dedup.py` — cross-scanner merge on a `(vuln id, component, repo)` fingerprint; keeps provenance from every scanner. |
@@ -69,10 +69,35 @@ Set it to `claude-fable-5` for the hardest chaining analysis — the engine then
 automatically enables server-side refusal fallbacks, because security tooling
 can trip Fable's false-positive classifier refusals.
 
+## Multi-provider AI harness
+
+Every AI stage goes through a **provider harness** (`providers/`) so tasks can
+run on models from **different suppliers**: `anthropic` (native structured
+outputs, adaptive thinking, effort, Fable fallbacks), `openai` (and any
+OpenAI-compatible endpoint via `OPENAI_BASE_URL`), and `google` (Gemini). Each
+supplier implements the same `complete_json` contract; non-Anthropic SDKs are
+optional (`pip install -e ".[providers]"`) and imported lazily.
+
+Pick a provider + model per task in config (or the Config tab):
+
+```yaml
+ai:
+  provider: anthropic          # default tier
+  model: claude-opus-4-8
+  tasks:
+    dedup:          { model: claude-haiku-4-5 }         # cheap, Anthropic
+    exploitability: { provider: openai, model: gpt-5 }  # different supplier
+    threat_model:   { provider: google, model: gemini-2.5-pro }
+```
+
+Credentials come from the environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
+[+ `OPENAI_BASE_URL`], `GEMINI_API_KEY`). Adding a supplier is a new
+`LLMProvider` subclass registered in `providers/__init__.py`.
+
 ## Model routing by task
 
 Not every AI task needs the same intelligence tier, and paying Opus rates for
-mechanical work is wasteful. `llm.py` routes each task to a model:
+mechanical work is wasteful. `llm.py` routes each task to a provider + model:
 
 | Task | Default tier | Why |
 |---|---|---|
@@ -234,6 +259,47 @@ You can also set the target repos without the CLI: in the **Config** tab, pick
 `github` as the repo source and enter `owner/name` repos in **GitHub repos**,
 then tick **live** and **Run scan** from the header.
 
+### OpenHack (whitebox source review)
+
+For a repo that Snyk/Xray haven't scanned, use Hadrian
+**[OpenHack](https://github.com/hadriansecurity/openhack)** to generate findings
+directly from source, then ingest them. OpenHack is an agentic review tool you
+run separately; it writes findings to a run directory
+(`runs/<target>/<run-id>/finding-candidates/*.json`).
+
+Point codescan at that output — in the **Config** tab under **OpenHack**: enable
+it, set **Findings dir** to the run dir (or its `finding-candidates/`), and set
+**Repo** to `owner/name`; or in config:
+
+```yaml
+openhack:
+  enabled: true
+  findings_dir: runs/horizon-scanner/2026-07-05T12-00
+  repo: mfmiguez-oss/horizon-scanner
+```
+
+codescan reads the finding-candidate JSON, normalizes each to a `Finding` (no
+CVE; carries severity, target path, description, remediation, and OWASP/CWE-class
+tags), then dedups, scores, and triages them alongside any Snyk/Xray findings.
+
+**Auto-run.** codescan can also *invoke* OpenHack as part of a live scan and
+ingest the output — set `openhack.auto` and a `command` that runs OpenHack for
+the repo (`{repo_path}` / `{output_dir}` are substituted; the AI-provider env
+vars are passed through to the subprocess):
+
+```yaml
+openhack:
+  auto: true
+  clone: true                 # git clone the target repo first
+  workspace: .openhack
+  command: ["bash", "run_openhack.sh", "{repo_path}", "{output_dir}"]
+```
+
+The command is configurable because OpenHack is a multi-phase agentic tool with
+its own LLM/automation setup — codescan runs your invocation (its wrapper or
+one-shot) and reads the resulting `finding-candidates/`. Same fields are editable
+in the Config tab under **OpenHack**.
+
 Inspect a produced import file:
 
 ```bash
@@ -280,7 +346,7 @@ and provide the secrets — `docker run --env-file .env …`, or uncomment
 src/codescan/
   config.py            config loading with ${ENV} interpolation
   models.py            canonical Finding model + fingerprint + VR state map
-  connectors/          bitbucket / github / snyk / xray
+  connectors/          bitbucket / github (sources) · snyk / xray / openhack (findings)
   llm.py               model router (task -> tier) + shared structured client
   dedup.py             deterministic cross-scanner merge
   dedup_ai.py          semantic near-duplicate merge (cheap tier / Haiku)

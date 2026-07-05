@@ -27,6 +27,7 @@ from .enrich import build_enrichers, run_enrichment
 from .exploitability import ExploitabilityEngine
 from .llm import LLMClient, ModelRouter
 from .models import Finding, Repo, ThreatModel
+from .openhack_runner import OpenHackRunner
 from .scoring import Scorer
 from .servicenow import ServiceNowExporter
 from .threatmodel import ThreatModelEngine, apply_threat_influence
@@ -84,10 +85,14 @@ class Pipeline:
         snyk = SnykConnector(self.cfg.snyk).fetch(repo_by_name)
         xray = XrayConnector(self.cfg.xray).fetch(repo_by_name)
         findings = [*snyk, *xray]
-        # OpenHack whitebox findings (from a run directory) — covers repos the
-        # SCA/CVE scanners haven't scanned.
+        # OpenHack whitebox findings — covers repos the SCA/CVE scanners missed.
         oh = self.cfg.openhack
-        if oh.enabled and oh.findings_dir:
+        if oh.auto and oh.command and repos:
+            # Run OpenHack for the target repo, then ingest its output.
+            target = next((r for r in repos if r.full_name == oh.repo), repos[0])
+            out_dir = OpenHackRunner(oh).run(target)
+            findings.extend(OpenHackConnector().from_dir(out_dir, target.full_name))
+        elif oh.enabled and oh.findings_dir:
             oh_repo = oh.repo or (repos[0].full_name if repos else "openhack")
             findings.extend(OpenHackConnector().from_dir(oh.findings_dir, oh_repo))
         return repos, findings

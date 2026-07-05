@@ -1,0 +1,33 @@
+[
+  {
+    "candidate_id": "S001-F001",
+    "scenario_id": "S001",
+    "expert": "injection",
+    "status": "accepted",
+    "primary_vulnerability_class": "injection",
+    "finding": {
+      "title": "SQL injection in order lookup",
+      "severity": "high",
+      "target_path": "src/main/java/com/pay/checkout/OrderController.java",
+      "summary": "The order-lookup endpoint concatenates the `orderId` request parameter directly into a SQL query, allowing injection.",
+      "impact": "An attacker can read or modify arbitrary order and payment records.",
+      "recommended_fix": "Use a parameterized query / prepared statement for the orderId lookup.",
+      "example_attack": "GET /orders?orderId=1' OR '1'='1"
+    }
+  },
+  {
+    "candidate_id": "S002-F001",
+    "scenario_id": "S002",
+    "expert": "broken-access-control",
+    "status": "accepted",
+    "primary_vulnerability_class": "broken access control",
+    "finding": {
+      "title": "Missing authorization on refund endpoint",
+      "severity": "critical",
+      "target_path": "src/main/java/com/pay/checkout/RefundController.java",
+      "summary": "The /refund endpoint does not verify that the authenticated user owns the order being refunded.",
+      "impact": "Any authenticated user can issue refunds for other users' orders.",
+      "recommended_fix": "Enforce an ownership check (order.userId == principal.id) before processing refunds."
+    }
+  }
+]

@@ -165,6 +165,7 @@ const children = [
   H1("5. Component design"),
   H2("5.1 Connectors"),
   P("All connectors extend a shared HttpClient (bearer auth, retry/backoff on 429/5xx, paging). Scanner connectors (Snyk, Xray) have two ingestion paths: fetch() for a live API pull and from_file() for a native scanner export. The offline path is not just for demos — it makes the pipeline runnable in CI, in tests, and against archived scan data with zero credentials."),
+  P("Findings sources are pluggable. Beyond Snyk/Xray (SCA/CVE), a third source — Hadrian OpenHack (connectors/openhack.py) — ingests whitebox source-review findings from an OpenHack run directory (finding-candidates/*.json). These are first-party source issues with no CVE (dedup keys on title + path); they carry severity, target path, description, remediation, and OWASP/CWE-class tags, and flow through the same normalize -> dedup -> score -> triage path — giving codescan findings for repos the SCA/CVE scanners never covered. codescan can ingest an existing run, or auto-invoke OpenHack during a live scan (openhack_runner.py): with openhack.auto it clones the repo and runs a configured command ({repo_path}/{output_dir} substituted, AI-provider env passed through), then ingests the output — the command is configurable because OpenHack is a multi-phase agentic tool with its own LLM setup."),
   P("The repo inventory (scan surface) comes from a pluggable SCM source: Bitbucket Data Center (bitbucket.py) or GitHub / GitHub Enterprise Server (github.py), selected by source.provider (editable in the config UI). Both emit the same Repo list; GitHub's identity is owner/name (its full_name), so Snyk/Xray findings anchor to the same repo regardless of provider. Repo mapping (Snyk projects / Xray builds back to repos) is the documented integration point to harden for production."),
   H2("5.2 Deduplication (two passes)"),
   ...bullets([
@@ -187,8 +188,8 @@ const children = [
     "Structured output — a JSON Schema guarantees a parseable response; no prompt-scraping.",
     "Per-service scoping — chaining is scoped to a repo/service, which keeps requests tractable and chains meaningful.",
   ]),
-  H2("5.5 Model routing (llm.py)"),
-  P("Different tasks need different intelligence tiers. ModelRouter resolves a task name to a ModelSpec (model + effort + token budget); LLMClient adapts each request to the model's capabilities so callers never have to."),
+  H2("5.5 Model routing + multi-provider harness (llm.py, providers/)"),
+  P("Every AI stage runs through a provider harness (providers/): each supplier — anthropic (native structured outputs, adaptive thinking, effort, Fable fallbacks), openai (and any OpenAI-compatible endpoint via OPENAI_BASE_URL), google (Gemini) — implements the same complete_json contract. Non-Anthropic SDKs are imported lazily, so they are optional deps. ModelRouter resolves a task to a ModelSpec (provider + model + effort + token budget) and LLMClient dispatches to the resolved supplier, so a task can run on any model from any supplier, set in config."),
   table(
     ["Task", "Default tier", "Rationale"],
     [
