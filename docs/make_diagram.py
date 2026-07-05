@@ -54,7 +54,7 @@ def main() -> None:
 
     # sources
     label(40, 92, "SOURCES")
-    box(ax, 110, 100, 180, 52, "Bitbucket", "repo inventory", IO)
+    box(ax, 110, 100, 180, 52, "SCM source", "Bitbucket / GitHub", IO)
     box(ax, 410, 100, 180, 52, "Snyk", "SCA / SAST findings", IO)
     box(ax, 710, 100, 180, 52, "JFrog Xray", "artifacts / CVEs", IO)
     for sx in (200, 500, 800):

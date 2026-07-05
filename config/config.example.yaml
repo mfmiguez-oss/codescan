@@ -24,11 +24,23 @@ ai:
     enrichment:           # AI remediation guidance + tags (cheap, mechanical)
       model: claude-haiku-4-5
 
+# Which SCM provides the repo inventory (scan surface).
+source:
+  provider: github    # bitbucket | github
+
 bitbucket:
   base_url: ${BITBUCKET_BASE_URL}
   token: ${BITBUCKET_TOKEN}
   # Restrict the scan surface. Empty projects list = all projects the token can see.
   projects: []           # e.g. ["PAY", "PLATFORM"]
+  verify_tls: true
+
+github:
+  # github.com, or GitHub Enterprise Server: https://ghe.internal/api/v3
+  api_url: ${GITHUB_API_URL}
+  token: ${GITHUB_TOKEN}
+  # Organizations to enumerate. Empty = all repos the token can see.
+  orgs: []               # e.g. ["acme-payments", "acme-platform"]
   verify_tls: true
 
 snyk:
@@ -70,7 +82,7 @@ enrichment:
 # extra call per service. Route it via ai.tasks.threat_model (defaults to the
 # default tier; set to claude-fable-5 for the deepest analysis).
 threat_model:
-  enabled: false
+  enabled: true
 
 scoring:
   # Weights for the composite 0-100 risk score. Must sum to 1.0.

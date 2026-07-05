@@ -33,6 +33,12 @@ def test_index_served(tmp_path):
     assert "codescan" in r.text
 
 
+def test_healthz(tmp_path):
+    r = _client(tmp_path).get("/healthz")
+    assert r.status_code == 200
+    assert r.json() == {"status": "ok"}
+
+
 def test_state_endpoint(tmp_path):
     r = _client(tmp_path).get("/api/state")
     assert r.status_code == 200
@@ -42,6 +48,32 @@ def test_state_endpoint(tmp_path):
     scores = [f["risk_score"] for f in body["findings"]]
     assert scores == sorted(scores, reverse=True)
     assert "states" in body and "confirmed" in body["states"]
+
+
+def test_scan_records_mode_and_time(tmp_path):
+    body = _client(tmp_path).post(
+        "/api/scan", json={"use_ai": False, "offline": True, "live": False}).json()
+    assert body["last_scan"]                    # run timestamp recorded
+    assert body["mode"]["live"] is False
+    assert "startup_error" in body
+
+
+def test_scan_failure_surfaced_not_500(tmp_path, monkeypatch):
+    """A failed run (e.g. live mode, no creds) returns 200 with an error, not 500."""
+    client = _client(tmp_path)
+    import codescan.web as web
+
+    class Boom:
+        def __init__(self, *a, **k):
+            pass
+
+        def run(self, *a, **k):
+            raise RuntimeError("bitbucket unreachable")
+
+    monkeypatch.setattr(web, "Pipeline", Boom)
+    r = client.post("/api/scan", json={"live": True})
+    assert r.status_code == 200
+    assert "bitbucket unreachable" in (r.json()["startup_error"] or "")
 
 
 def test_change_validation_state_persists(tmp_path):
@@ -103,6 +135,19 @@ def test_update_config_applies_and_persists(tmp_path):
 
 def test_invalid_effort_rejected(tmp_path):
     assert _client(tmp_path).post("/api/config", json={"ai": {"effort": "turbo"}}).status_code == 400
+
+
+def test_source_provider_config(tmp_path):
+    client = _client(tmp_path)
+    body = client.get("/api/config").json()
+    assert body["source"]["provider"] == "bitbucket"
+    assert "github" in body["connectors"]
+    assert body["options"]["scm_providers"] == ["bitbucket", "github"]
+
+    switched = client.post("/api/config", json={"source": {"provider": "github"}}).json()
+    assert switched["source"]["provider"] == "github"
+    # Unknown provider is rejected.
+    assert client.post("/api/config", json={"source": {"provider": "gitlab"}}).status_code == 400
 
 
 def test_servicenow_format_config(tmp_path):

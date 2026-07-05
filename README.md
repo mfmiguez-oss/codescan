@@ -29,7 +29,7 @@ diagram is in [docs/architecture.svg](docs/architecture.svg) /
 
 | Requirement | Where it lives |
 |---|---|
-| Code in a local Bitbucket install | `connectors/bitbucket.py` — on-prem REST API builds the repo inventory (the scan surface). |
+| Code in a local Bitbucket install | `connectors/bitbucket.py` — on-prem REST API builds the repo inventory (the scan surface). **GitHub/GHES** (`connectors/github.py`) is a selectable alternative via `source.provider`. |
 | Snyk + Xray available | `connectors/snyk.py`, `connectors/xray.py` — live API pull **or** offline export files, both normalized to one `Finding` model. |
 | Output ready for ServiceNow Vulnerabilities | `servicenow.py` — `sn_vul_vulnerable_item` records with risk score, state, and reasoning; idempotent via `correlation_id`. |
 | Validation states | `validation.py` + `models.py` — internal lifecycle (`new → under_investigation → confirmed / false_positive / risk_accepted / duplicate / resolved`) mapped to ServiceNow VR states, with a sticky **state store** so re-scans never re-open closed items. |
@@ -154,8 +154,12 @@ codescan serve --live          # scan Bitbucket/Snyk/Xray instead of fixtures
 ```
 
 The dashboard shows the ServiceNow VR queue (findings ranked by composite risk),
-with filters (search, severity, state, repo, min risk), signal badges (KEV,
-attack-chain membership, EPSS, reporting scanners), and a **Run scan** button.
+with filters (search, severity, state, repo, min risk) and signal badges (KEV,
+attack-chain membership, EPSS, reporting scanners). **Run scans from the UI**
+with the header's **Run scan** button and the **AI / offline / live** toggles —
+including on-demand **live** scans of Bitbucket/Snyk/Xray. A "last run" chip
+shows when it last ran; a failed run (e.g. live mode without credentials) keeps
+the previous results and surfaces the error in a banner instead of crashing.
 Click a finding for the detail drawer: CVSS vector, EPSS, reachability,
 cross-scanner provenance, fix versions, the AI exploitability rationale, and any
 attack chains it belongs to (narrative, preconditions, impact, MITRE ATT&CK).
@@ -209,13 +213,47 @@ Inspect a produced import file:
 codescan summary --out servicenow_import.json
 ```
 
+## Container deployment
+
+Build and run the web UI in a container — offline demo, no key needed:
+
+```bash
+docker compose up --build          # -> http://localhost:8000
+# or without compose:
+docker build -t codescan .
+docker run -p 8000:8000 -v codescan-data:/data codescan
+```
+
+Everything is environment-driven (no rebuild to reconfigure):
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `CODESCAN_AI` | `false` | Enable the AI stages (needs `ANTHROPIC_API_KEY`) |
+| `CODESCAN_LIVE` | `false` | Scan Bitbucket/Snyk/Xray instead of the bundled fixtures (needs creds) |
+| `CODESCAN_PORT` | `8000` | Listen port |
+| `CODESCAN_CONFIG` / `CODESCAN_FIXTURES` | baked-in | Override the config / fixtures paths |
+| secrets | — | `ANTHROPIC_API_KEY`, `BITBUCKET_*`, `GITHUB_*`, `SNYK_*`, `XRAY_*`, `SERVICENOW_*` (see `.env.example`) |
+
+For a live, AI-enabled deployment set `CODESCAN_AI=true` and `CODESCAN_LIVE=true`,
+and provide the secrets — `docker run --env-file .env …`, or uncomment
+`env_file: .env` in `docker-compose.yml`. Mount your own config over
+`/app/config` to replace the default.
+
+- Runs as a **non-root** user; the image holds **no secrets** (all via env).
+- Runtime artifacts (ServiceNow export, validation state, config overrides,
+  threat models) are written to **`/data`** — mount a volume to persist them.
+- A **`/healthz`** endpoint backs the container `HEALTHCHECK`; a failed initial
+  scan (e.g. missing live creds) is surfaced, not fatal — the UI still boots.
+- Scan state is held **in memory**, so run a **single instance** (horizontal
+  scale needs the shared datastore noted in the design doc).
+
 ## Layout
 
 ```
 src/codescan/
   config.py            config loading with ${ENV} interpolation
   models.py            canonical Finding model + fingerprint + VR state map
-  connectors/          bitbucket / snyk / xray
+  connectors/          bitbucket / github / snyk / xray
   llm.py               model router (task -> tier) + shared structured client
   dedup.py             deterministic cross-scanner merge
   dedup_ai.py          semantic near-duplicate merge (cheap tier / Haiku)

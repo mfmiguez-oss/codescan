@@ -13,7 +13,6 @@ via POST /api/scan.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -35,7 +34,6 @@ KNOWN_MODELS = [
 ]
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 ROUTED_TASKS = ["dedup", "exploitability", "enrichment", "threat_model"]
-SCM_PROVIDERS = ["bitbucket", "github"]
 
 
 def _mask(secret: str) -> str:
@@ -73,17 +71,12 @@ def sanitized_config(cfg: Config) -> dict:
             "format": cfg.servicenow.format,
             "password": _mask(cfg.servicenow.password),
         },
-        "source": {"provider": cfg.source.provider},
         "connectors": {
             "bitbucket": {"base_url": cfg.bitbucket.base_url, "token": _mask(cfg.bitbucket.token)},
-            "github": {"api_url": cfg.github.api_url, "token": _mask(cfg.github.token)},
             "snyk": {"api_url": cfg.snyk.api_url, "token": _mask(cfg.snyk.token)},
             "xray": {"base_url": cfg.xray.base_url, "token": _mask(cfg.xray.token)},
         },
-        "options": {
-            "known_models": KNOWN_MODELS, "efforts": EFFORTS,
-            "routed_tasks": ROUTED_TASKS, "scm_providers": SCM_PROVIDERS,
-        },
+        "options": {"known_models": KNOWN_MODELS, "efforts": EFFORTS, "routed_tasks": ROUTED_TASKS},
     }
 
 
@@ -125,12 +118,6 @@ def apply_config(cfg: Config, update: dict) -> None:
 
     if "enabled" in update.get("threat_model", {}):
         cfg.threat_model.enabled = bool(update["threat_model"]["enabled"])
-
-    if "provider" in update.get("source", {}):
-        provider = str(update["source"]["provider"]).lower()
-        if provider not in SCM_PROVIDERS:
-            raise ValueError(f"source.provider must be one of {SCM_PROVIDERS}")
-        cfg.source.provider = provider
 
     sn = update.get("servicenow", {})
     if "push" in sn:
@@ -196,9 +183,9 @@ def finding_to_dict(f: Finding) -> dict:
 
 
 class ScanRequest(BaseModel):
+    fixtures: str | None = None
     use_ai: bool | None = None
     offline: bool | None = None
-    live: bool | None = None       # scan live systems vs the configured fixtures
 
 
 class StateChange(BaseModel):
@@ -208,15 +195,13 @@ class StateChange(BaseModel):
 class AppState:
     """Holds config + the latest pipeline result for the API."""
 
-    def __init__(self, config_path, fixtures, live, use_ai, offline, out_path, state_path, overrides_path):
+    def __init__(self, config_path, fixtures, use_ai, offline, out_path, state_path, overrides_path):
         self.cfg = Config.load(config_path)
-        self.fixtures = fixtures or "fixtures"   # always a path, for toggling live off
-        self.live = live
+        self.fixtures = fixtures
         self.use_ai = use_ai
         self.offline = offline
         self.out_path = out_path
         self.state_path = state_path
-        self.last_scan: str | None = None
         self.overrides_path = Path(overrides_path) if overrides_path else None
         # Layer any UI-saved overrides on top of the base config.
         if self.overrides_path and self.overrides_path.exists():
@@ -241,18 +226,13 @@ class AppState:
             self.overrides_path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
         return sanitized_config(self.cfg)
 
-    def scan(self, use_ai=None, offline=None, live=None) -> PipelineResult:
+    def scan(self, fixtures=None, use_ai=None, offline=None) -> PipelineResult:
+        fx = self.fixtures if fixtures is None else fixtures
         ai = self.use_ai if use_ai is None else use_ai
         off = self.offline if offline is None else offline
-        lv = self.live if live is None else live
-        fx = None if lv else self.fixtures       # None -> live ingest
         self.result = Pipeline(self.cfg, offline=off, use_ai=ai).run(
             fixtures=fx, out_path=self.out_path, state_path=self.state_path
         )
-        # Remember what was actually run, so the UI reflects it.
-        self.use_ai, self.offline, self.live = ai, off, lv
-        self.startup_error = None
-        self.last_scan = datetime.now(timezone.utc).isoformat(timespec="seconds")
         return self.result
 
     def set_state(self, fid: str, state: str) -> Finding:
@@ -280,8 +260,7 @@ def _payload(state: AppState) -> dict:
         "chains": r.chains,
         "threat_models": [tm.model_dump() for tm in r.threat_models],
         "states": [s.value for s in ValidationState],
-        "mode": {"use_ai": state.use_ai, "offline": state.offline, "live": state.live},
-        "last_scan": state.last_scan,
+        "mode": {"use_ai": state.use_ai, "offline": state.offline},
         "startup_error": state.startup_error,
     }
 
@@ -290,14 +269,13 @@ def create_app(
     config_path: str = "config/config.example.yaml",
     fixtures: str | None = None,
     *,
-    live: bool = False,
     use_ai: bool = False,
     offline: bool = False,
     out_path: str = "servicenow_import.json",
     state_path: str = "validation_state.json",
     overrides_path: str = "config.overrides.json",
 ) -> FastAPI:
-    state = AppState(config_path, fixtures, live, use_ai, offline, out_path, state_path, overrides_path)
+    state = AppState(config_path, fixtures, use_ai, offline, out_path, state_path, overrides_path)
     app = FastAPI(title="codescan", version="0.1.0")
 
     @app.get("/", response_class=HTMLResponse)
@@ -315,12 +293,7 @@ def create_app(
 
     @app.post("/api/scan")
     def scan(req: ScanRequest) -> dict:
-        # Surface scan failures (e.g. live mode, bad creds) as an error banner
-        # rather than a 500 — the previous result stays visible.
-        try:
-            state.scan(req.use_ai, req.offline, req.live)
-        except Exception as exc:  # noqa: BLE001
-            state.startup_error = str(exc)
+        state.scan(req.fixtures, req.use_ai, req.offline)
         return _payload(state)
 
     @app.post("/api/findings/{fid}/state")

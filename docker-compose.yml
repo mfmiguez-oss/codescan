@@ -1,0 +1,28 @@
+services:
+  codescan:
+    build: .
+    image: codescan:latest
+    ports:
+      - "8000:8000"
+    environment:
+      CODESCAN_HOST: "0.0.0.0"
+      CODESCAN_PORT: "8000"
+      # Enable the AI stages (exploitability, chaining, threat modeling,
+      # semantic dedup, AI enrichment). Requires ANTHROPIC_API_KEY below.
+      CODESCAN_AI: "false"
+      # Scan live Bitbucket/Snyk/Xray instead of the bundled sample fixtures.
+      # Requires the connector credentials below.
+      CODESCAN_LIVE: "false"
+    # Secrets come from the environment (config uses ${ENV} interpolation).
+    # Copy .env.example -> .env and uncomment to load them.
+    # env_file:
+    #   - .env
+    volumes:
+      # Persist outputs, validation state, and config overrides.
+      - codescan-data:/data
+      # Optional: mount your own config over the baked-in default.
+      # - ./config:/app/config:ro
+    restart: unless-stopped
+
+volumes:
+  codescan-data:

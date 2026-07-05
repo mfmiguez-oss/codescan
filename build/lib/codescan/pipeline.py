@@ -18,9 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import Config
-from .connectors import (
-    BitbucketConnector, GitHubConnector, SnykConnector, XrayConnector,
-)
+from .connectors import BitbucketConnector, SnykConnector, XrayConnector
 from .dedup import deduplicate
 from .dedup_ai import SemanticDeduper
 from .enrich import build_enrichers, run_enrichment
@@ -71,14 +69,8 @@ class Pipeline:
         self.use_ai = use_ai
 
     # --- ingestion --------------------------------------------------------
-    def _repo_connector(self):
-        """The SCM connector that supplies the repo inventory."""
-        if self.cfg.source.provider == "github":
-            return GitHubConnector(self.cfg.github)
-        return BitbucketConnector(self.cfg.bitbucket)
-
     def _ingest_live(self) -> tuple[list[Repo], list[Finding]]:
-        repos = self._repo_connector().list_repos()
+        repos = BitbucketConnector(self.cfg.bitbucket).list_repos()
         # Map scanner project/build names back to repo full names.
         repo_by_name = {r.slug: r.full_name for r in repos}
         snyk = SnykConnector(self.cfg.snyk).fetch(repo_by_name)

@@ -50,19 +50,6 @@ class BitbucketConfig(BaseModel):
     verify_tls: bool = True
 
 
-class GitHubConfig(BaseModel):
-    api_url: str = "https://api.github.com"   # or GHES: https://ghe.internal/api/v3
-    token: str = ""
-    orgs: list[str] = []                      # empty = all repos the token can see
-    verify_tls: bool = True
-
-
-class SourceConfig(BaseModel):
-    """Which SCM provides the repo inventory (scan surface)."""
-
-    provider: str = "bitbucket"               # bitbucket | github
-
-
 class SnykConfig(BaseModel):
     api_url: str = ""
     token: str = ""
@@ -114,9 +101,7 @@ class ScoringConfig(BaseModel):
 
 class Config(BaseModel):
     ai: AIConfig = AIConfig()
-    source: SourceConfig = SourceConfig()
     bitbucket: BitbucketConfig = BitbucketConfig()
-    github: GitHubConfig = GitHubConfig()
     snyk: SnykConfig = SnykConfig()
     xray: XrayConfig = XrayConfig()
     servicenow: ServiceNowConfig = ServiceNowConfig()

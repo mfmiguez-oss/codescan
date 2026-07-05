@@ -47,7 +47,7 @@ ServiceNow-ready records — with an analyst UI on top.
 
 | Requirement | Design element |
 |---|---|
-| Code in local Bitbucket | `connectors/bitbucket.py` — on-prem REST API builds the repo inventory (scan surface). |
+| Code in local Bitbucket | `connectors/bitbucket.py` — on-prem REST API builds the repo inventory (scan surface). GitHub/GHES (`connectors/github.py`) is a selectable alternative via `source.provider`. |
 | Snyk + Xray available | `connectors/snyk.py`, `connectors/xray.py` — live pull or offline export, normalized to one `Finding`. |
 | Output for ServiceNow Vulnerabilities | `servicenow.py` — `sn_vul_vulnerable_item` records, idempotent via `correlation_id`. |
 | Validation states | `validation.py` + `models.py` — lifecycle + sticky state store + VR state mapping. |
@@ -163,7 +163,13 @@ The offline path is not just for demos: it makes the whole pipeline runnable in
 CI, in tests, and against archived scan data with zero credentials. Fixtures
 under `fixtures/` drive the default UI and the test suite.
 
-**Repo mapping.** Snyk projects and Xray builds must map back to Bitbucket repos
+**Repo source is pluggable.** The repo inventory comes from either Bitbucket
+Data Center (`bitbucket.py`) or GitHub / GitHub Enterprise Server (`github.py`),
+selected by `source.provider` (editable in the config UI). Both emit the same
+`Repo` list, and GitHub's identity is `owner/name` (its `full_name`), so Snyk/Xray
+findings anchor to the same repo regardless of provider.
+
+**Repo mapping.** Snyk projects and Xray builds must map back to repos
 so their findings land on the same repo and can be deduped. The pipeline passes
 a `name → repo` map into each connector; the current implementation matches by
 slug and is the documented integration point to harden for production (§11).
@@ -333,6 +339,13 @@ dependency-free HTML page for the frontend. Endpoints: `GET /api/state`,
   the base config on restart. `POST` is validated server-side and rejected with
   400 on bad input.
 
+Scans run from the header (AI / offline / live toggles + Run scan) via
+`POST /api/scan`, in-process, recording a last-run timestamp. On-demand **live**
+scans of Bitbucket/Snyk/Xray are supported (not just the boot mode). A failed
+run — e.g. live mode without credentials — is caught and shown in an error
+banner with the last good result preserved, rather than returning a 500;
+`/healthz` backs the container probe.
+
 ---
 
 ### 5.10 Threat modeling (`threatmodel.py`, optional, deep tier)
@@ -483,6 +496,11 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   discriminator would let the fingerprint switch granularity.
 - **State store is a JSON file.** Fine for a single runner; a shared datastore is
   needed for concurrent runners / HA.
+- **Single-instance runtime.** The web server holds scan state in memory, so it
+  runs as one replica (the shipped `Dockerfile` / `docker-compose.yml` deploy a
+  single non-root container that writes runtime artifacts to a `/data` volume;
+  secrets are injected via environment). Horizontal scale needs the shared
+  datastore above.
 - **AI concurrency.** Per-service calls are serial today; parallelizing or moving
   to the Batches API would cut wall-clock time on large estates.
 - **ServiceNow field mapping** targets a generic `sn_vul_vulnerable_item` import;

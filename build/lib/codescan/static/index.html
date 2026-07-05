@@ -91,9 +91,6 @@
            background: #1e293b; border: 1px solid var(--accent); color: #fff; padding: 10px 18px;
            border-radius: 8px; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 30; }
   .toast.show { opacity: 1; }
-  .banner { background: #3a1620; border-bottom: 1px solid var(--crit); color: #ffb3bb;
-            padding: 9px 20px; font-size: 13px; }
-  .chip.live { border-color: var(--high); color: #ffd0ad; }
   /* threats */
   .tm { margin-bottom: 20px; }
   .tm .head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; }
@@ -119,11 +116,8 @@
   <div class="grow"></div>
   <label class="f"><input type="checkbox" id="opt-ai" /> AI</label>
   <label class="f"><input type="checkbox" id="opt-offline" checked /> offline</label>
-  <label class="f" title="Scan live Bitbucket/Snyk/Xray instead of fixtures"><input type="checkbox" id="opt-live" /> live</label>
   <button id="scan">Run scan</button>
 </header>
-
-<div class="banner" id="banner" style="display:none"></div>
 
 <div class="toolbar" id="toolbar">
   <input type="search" id="q" placeholder="Search title, CVE, component…" />
@@ -175,7 +169,6 @@ const esc = (t) => (t ?? '').toString().replace(/[&<>]/g, c => ({'&':'&amp;','<'
 
 async function load(payload) {
   DATA = payload;
-  syncMode();
   CHAINS_BY_ID = Object.fromEntries((DATA.chains || []).map(c => [c.chain_id, c]));
   THREATS_BY_FINDING = {};
   (DATA.threat_models || []).forEach(tm => (tm.threats || []).forEach(t => {
@@ -192,28 +185,15 @@ async function load(payload) {
   render();
 }
 
-function syncMode() {
-  const m = DATA.mode || {};
-  $('#opt-ai').checked = !!m.use_ai;
-  $('#opt-offline').checked = !!m.offline;
-  $('#opt-live').checked = !!m.live;
-  const b = $('#banner');
-  if (DATA.startup_error) { b.textContent = '⚠ Last scan failed: ' + DATA.startup_error; b.style.display = 'block'; }
-  else { b.style.display = 'none'; }
-}
-
 function renderChips() {
   const s = DATA.summary || {};
   const sev = s.by_severity || {};
-  const when = DATA.last_scan ? new Date(DATA.last_scan).toLocaleTimeString() : null;
   $('#chips').innerHTML = [
     `<span class="chip"><b>${s.findings||0}</b> findings</span>`,
     `<span class="chip"><b>${s.repos||0}</b> repos</span>`,
     `<span class="chip" style="border-color:var(--crit)"><b>${s.kev||0}</b> KEV</span>`,
     (s.threats ? `<span class="chip"><b>${s.threats}</b> threats</span>` : ''),
     `<span class="chip"><b>${sev.critical||0}</b> crit · <b>${sev.high||0}</b> high · <b>${sev.medium||0}</b> med</span>`,
-    ((DATA.mode||{}).live ? '<span class="chip live">live</span>' : ''),
-    (when ? `<span class="chip">last run ${when}</span>` : ''),
   ].join('');
 }
 
@@ -411,12 +391,11 @@ async function runScan() {
   try {
     const r = await fetch('/api/scan', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ use_ai: $('#opt-ai').checked, offline: $('#opt-offline').checked, live: $('#opt-live').checked })
+      body: JSON.stringify({ use_ai: $('#opt-ai').checked, offline: $('#opt-offline').checked })
     });
     if (!r.ok) throw new Error(await r.text());
     await load(await r.json());
-    toast(DATA.startup_error ? 'Scan failed — see banner' : 'Scan complete', !DATA.startup_error);
-  } catch (e) { toast('Scan failed: ' + e.message, false); }
+  } catch (e) { alert('Scan failed: ' + e.message); }
   finally { btn.disabled = false; btn.textContent = 'Run scan'; }
 }
 
@@ -516,11 +495,8 @@ function renderConfig() {
     </div>
     <div class="card">
       <h4>Connectors <span class="muted" style="font-weight:400">— secrets managed via environment</span></h4>
-      <div class="formrow"><label>Repo source</label>${sel('scm-provider', c.options.scm_providers, c.source.provider)}</div>
       <div class="formrow ro"><label>Bitbucket URL</label><span>${esc(cn.bitbucket.base_url || '—')}</span></div>
       <div class="formrow ro"><label>Bitbucket token</label><span>${esc(cn.bitbucket.token || '(unset)')}</span></div>
-      <div class="formrow ro"><label>GitHub URL</label><span>${esc(cn.github.api_url || '—')}</span></div>
-      <div class="formrow ro"><label>GitHub token</label><span>${esc(cn.github.token || '(unset)')}</span></div>
       <div class="formrow ro"><label>Snyk URL</label><span>${esc(cn.snyk.api_url || '—')}</span></div>
       <div class="formrow ro"><label>Snyk token</label><span>${esc(cn.snyk.token || '(unset)')}</span></div>
       <div class="formrow ro"><label>Xray URL</label><span>${esc(cn.xray.base_url || '—')}</span></div>
@@ -541,7 +517,6 @@ async function saveConfig() {
     ai: { model: $('#ai-model').value, effort: $('#ai-effort').value, max_tokens: Number($('#ai-max').value), tasks },
     enrichment: { kev_enabled: $('#en-kev').checked, epss_enabled: $('#en-epss').checked, reachability_enabled: $('#en-reach').checked, ai_enabled: $('#en-ai').checked },
     threat_model: { enabled: $('#tm-enabled').checked },
-    source: { provider: $('#scm-provider').value },
     scoring: { weights: { severity: Number($('#w-sev').value), exploitability: Number($('#w-exp').value), exposure: Number($('#w-exposure').value), chaining: Number($('#w-chain').value) }, kev_floor: Number($('#kev-floor').value) },
     servicenow: { push: $('#sn-push').checked, format: $('#sn-format').value },
   };

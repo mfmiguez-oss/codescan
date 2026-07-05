@@ -79,8 +79,7 @@ def serve(
 
     application = create_app(
         config_path=config,
-        fixtures=fixtures,
-        live=live,
+        fixtures=None if live else fixtures,
         use_ai=ai,
         offline=not ai,
     )

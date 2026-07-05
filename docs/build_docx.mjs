@@ -119,7 +119,7 @@ const children = [
   table(
     ["Requirement", "Design element"],
     [
-      ["Code in local Bitbucket", "connectors/bitbucket.py — on-prem REST API builds the repo inventory (scan surface)."],
+      ["Code in local Bitbucket", "connectors/bitbucket.py — builds the repo inventory. GitHub/GHES (connectors/github.py) is a selectable alternative via source.provider."],
       ["Snyk + Xray available", "connectors/snyk.py, connectors/xray.py — live pull or offline export, normalized to one Finding."],
       ["Output for ServiceNow Vulnerabilities", "servicenow.py — sn_vul_vulnerable_item records, idempotent via correlation_id."],
       ["Validation states", "validation.py + models.py — lifecycle + sticky state store + VR state mapping."],
@@ -164,7 +164,8 @@ const children = [
 
   H1("5. Component design"),
   H2("5.1 Connectors"),
-  P("All three extend a shared HttpClient (bearer auth, retry/backoff on 429/5xx, paging). Each has two ingestion paths: fetch() for a live API pull and from_file() for a native scanner export. The offline path is not just for demos — it makes the pipeline runnable in CI, in tests, and against archived scan data with zero credentials. Repo mapping (Snyk projects / Xray builds back to Bitbucket repos) is the documented integration point to harden for production."),
+  P("All connectors extend a shared HttpClient (bearer auth, retry/backoff on 429/5xx, paging). Scanner connectors (Snyk, Xray) have two ingestion paths: fetch() for a live API pull and from_file() for a native scanner export. The offline path is not just for demos — it makes the pipeline runnable in CI, in tests, and against archived scan data with zero credentials."),
+  P("The repo inventory (scan surface) comes from a pluggable SCM source: Bitbucket Data Center (bitbucket.py) or GitHub / GitHub Enterprise Server (github.py), selected by source.provider (editable in the config UI). Both emit the same Repo list; GitHub's identity is owner/name (its full_name), so Snyk/Xray findings anchor to the same repo regardless of provider. Repo mapping (Snyk projects / Xray builds back to repos) is the documented integration point to harden for production."),
   H2("5.2 Deduplication (two passes)"),
   ...bullets([
     "Deterministic (dedup.py) — group by fingerprint, merge collisions. The merge keeps the higher-severity record as primary, unions CVEs/CWEs/references/fixes, prefers a present CVSS and the longer description, and records provenance from every contributing scanner. A finding seen by both scanners earns a corroboration bonus in scoring.",
@@ -217,6 +218,7 @@ const children = [
   P("A FastAPI backend holds the latest result in memory; the frontend is a single dependency-free HTML page with three views. Findings: the triage queue with filters, signal badges, a per-finding detail drawer (CVSS vector, EPSS, reachability, provenance, rationale, remediation, tags, threats, chains), and inline validation-state editing that persists to the sticky store."),
   P("Threats: the per-service threat models (5.10) — STRIDE threats with linked findings/chains, assets, entry points, trust boundaries, posture, and recommendations."),
   P("Config: edit non-secret settings live — default AI tier, per-task model routing, enrichment toggles, threat-modeling toggle, scoring weights, and the ServiceNow push flag. Secrets are shown masked and read-only (they stay in the environment). Edits apply to the next scan and persist to config.overrides.json, layered over the base config on restart; POST is validated server-side and rejected with 400 on bad input."),
+  P("Scans run from the header (AI / offline / live toggles + Run scan) via POST /api/scan, in-process, recording a last-run timestamp. On-demand live scans of Bitbucket/Snyk/Xray are supported, not just the boot mode. A failed run — e.g. live mode without credentials — is caught and shown in an error banner with the last good result preserved, rather than returning a 500; /healthz backs the container probe."),
 
   H2("5.10 Threat modeling (threatmodel.py, optional, deep tier)"),
   P("Where the exploitability engine works bottom-up (per-finding scores, concrete chains), threat modeling is the top-down counterpart. Per service it produces a STRIDE threat model grounded in that service's findings and chains:"),
@@ -286,6 +288,7 @@ const children = [
     "Reachability is a metadata heuristic; feeding real call-graph / reachable-vuln data would sharpen both the AI judgement and the exposure score.",
     "SCA-oriented fingerprint; SAST findings need path/line — a finding_kind discriminator would switch granularity.",
     "State store is a JSON file; a shared datastore is needed for concurrent runners / HA.",
+    "Single-instance runtime — the web server holds scan state in memory, so it runs as one replica. The shipped Dockerfile / docker-compose.yml deploy a single non-root container that writes runtime artifacts to a /data volume, with secrets injected via environment. Horizontal scale needs the shared datastore above.",
     "AI concurrency — per-service calls are serial today; parallelizing or the Batches API would cut wall-clock time.",
     "ServiceNow field mapping targets a generic import; align it to each deployment's VR transform map.",
     "No auth on the web UI; add authn/authz before exposing it beyond a trusted network.",
