@@ -56,11 +56,7 @@ def sanitized_config(cfg: Config) -> dict:
                 for name, t in cfg.ai.tasks.items()
             },
         },
-        "scoring": {
-            "weights": dict(cfg.scoring.weights),
-            "kev_floor": cfg.scoring.kev_floor,
-            "threat_boost": cfg.scoring.threat_boost,
-        },
+        "scoring": {"weights": dict(cfg.scoring.weights), "kev_floor": cfg.scoring.kev_floor},
         "enrichment": {
             "kev_enabled": cfg.enrichment.kev_enabled,
             "epss_enabled": cfg.enrichment.epss_enabled,
@@ -114,8 +110,6 @@ def apply_config(cfg: Config, update: dict) -> None:
         cfg.scoring.weights = {k: float(v) for k, v in sc["weights"].items()}
     if "kev_floor" in sc:
         cfg.scoring.kev_floor = float(sc["kev_floor"])
-    if "threat_boost" in sc:
-        cfg.scoring.threat_boost = float(sc["threat_boost"])
 
     en = update.get("enrichment", {})
     for key in ("kev_enabled", "epss_enabled", "reachability_enabled", "ai_enabled"):

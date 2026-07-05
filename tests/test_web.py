@@ -113,11 +113,6 @@ def test_servicenow_format_config(tmp_path):
     assert client.post("/api/config", json={"servicenow": {"format": "xml"}}).status_code == 400
 
 
-def test_scoring_threat_boost_config(tmp_path):
-    body = _client(tmp_path).post("/api/config", json={"scoring": {"threat_boost": 25}}).json()
-    assert body["scoring"]["threat_boost"] == 25
-
-
 def test_threat_model_toggle_and_state(tmp_path):
     client = _client(tmp_path)
     body = client.post("/api/config", json={"threat_model": {"enabled": True}}).json()

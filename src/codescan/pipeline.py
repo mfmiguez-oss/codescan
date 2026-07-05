@@ -126,19 +126,17 @@ class Pipeline:
             chains = ExploitabilityEngine(llm).assess(findings)  # deep tier
 
         # Threat modeling runs before scoring so it can feed back in: it enriches
-        # each cited finding's exploitability and yields per-service risk that
-        # boosts the composite score.
+        # each cited finding's exploitability, which the scorer then reflects.
         threat_models: list[ThreatModel] = []
-        service_risk: dict[str, str] = {}
         if llm and self.cfg.threat_model.enabled:
             threat_models = ThreatModelEngine(llm).build(findings, chains)  # deep tier
-            service_risk = apply_threat_influence(findings, threat_models)
+            apply_threat_influence(findings, threat_models)
             Path(out_path).with_name("threat_models.json").write_text(
                 json.dumps([tm.model_dump() for tm in threat_models], indent=2),
                 encoding="utf-8",
             )
 
-        Scorer(self.cfg.scoring).score(findings, chains, service_risk)
+        Scorer(self.cfg.scoring).score(findings, chains)
 
         store = StateStore(state_path)
         assign_states(findings, store)

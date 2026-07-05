@@ -267,12 +267,12 @@ Adjustments on top of the blend:
 - **KEV floor** — anything in the KEV catalog is floored to `kev_floor` (85).
   Actively exploited outweighs modelling.
 - **Corroboration bonus** — +2 when both scanners agree.
-- **Threat boost** — an *additive* bonus (up to `threat_boost`, default 15) for
-  findings implicated by the service threat model, scaled by the stronger of the
-  finding's threat signal and its service posture (§5.10). Additive, not a
-  reweighting, so runs *without* threat modeling are never penalized. Threats
-  also enrich the exploitability dimension directly (the threat signal is one of
-  the averaged inputs above).
+
+**Threat models influence the score in exactly one place: the exploitability
+dimension.** When threat modeling is on, a cited finding's `threat_signal` is one
+of the averaged exploitability inputs above, so a threatened finding scores
+higher — counted once, not double-weighted. Runs without threat modeling are
+unaffected (`threat_signal` is 0).
 
 This is the reordering that makes the queue useful: an unreachable critical CVE
 drops below a reachable, chainable high.
@@ -361,8 +361,8 @@ terminal report), `apply_threat_influence` writes results back onto findings: it
 records the citing threat IDs, derives a per-finding `threat_signal` (0–100 from
 the strongest citing threat's likelihood), and raises the categorical
 exploitability *level* when the threat implies more than the isolated assessment
-did. The scorer then consumes the threat signal (exploitability dimension) and
-the per-service risk posture (additive threat boost) — see §5.6.
+did. The scorer reflects this through the exploitability dimension only, so the
+threat is counted once (see §5.6).
 
 ## 6. Data flow — a scan
 

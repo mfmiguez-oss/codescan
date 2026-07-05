@@ -97,10 +97,6 @@ class ScoringConfig(BaseModel):
         "chaining": 0.15,
     }
     kev_floor: float = 85.0
-    # Additive bonus (0-100 points, scaled) for findings implicated by the
-    # service threat model. Additive so runs without threat modeling aren't
-    # penalized. Threats also enrich the exploitability dimension directly.
-    threat_boost: float = 15.0
 
 
 class Config(BaseModel):

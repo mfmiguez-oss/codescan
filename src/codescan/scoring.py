@@ -26,13 +26,7 @@ class Scorer:
         # Normalize weights so the score stays 0-100 even if they don't sum to 1.
         self.w = {k: v / total for k, v in cfg.weights.items()} if total else cfg.weights
 
-    def score(
-        self,
-        findings: list[Finding],
-        chains: list[dict],
-        service_risk: dict[str, str] | None = None,
-    ) -> None:
-        service_risk = service_risk or {}
+    def score(self, findings: list[Finding], chains: list[dict]) -> None:
         chain_score_by_id: dict[str, float] = {}
         for c in chains:
             cs = float(c.get("chain_score", 0))
@@ -40,14 +34,14 @@ class Scorer:
                 chain_score_by_id[fid] = max(chain_score_by_id.get(fid, 0.0), cs)
 
         for f in findings:
-            f.risk_score = self._score_one(
-                f, chain_score_by_id.get(f.id, 0.0),
-                service_risk.get(f.location.repo, ""),
-            )
+            f.risk_score = self._score_one(f, chain_score_by_id.get(f.id, 0.0))
 
-    def _score_one(self, f: Finding, chain_score: float, service_risk_level: str) -> float:
+    def _score_one(self, f: Finding, chain_score: float) -> float:
         severity = (f.cvss_score * 10) if f.cvss_score else (f.severity.rank / 4 * 100)
-        exploit = self._exploit_component(f)          # threat_signal enriches this
+        # Threat-model influence enters here: threat_signal is one of the averaged
+        # exploitability inputs, so a threatened finding scores higher — counted
+        # once, in the exploitability dimension.
+        exploit = self._exploit_component(f)
         exposure = self._exposure_component(f)
 
         blended = (
@@ -58,12 +52,6 @@ class Scorer:
         )
         # Multi-scanner agreement adds a small confidence bump.
         blended += 2.0 * corroboration_bonus(f)
-
-        # Threat-model influence: additive boost (so threatless runs aren't
-        # penalized), driven by the stronger of the finding's threat signal and
-        # its service's overall posture.
-        threat_factor = max(f.exploitability.threat_signal, service_risk_score(service_risk_level))
-        blended += self.cfg.threat_boost * threat_factor / 100.0
 
         if f.exploitability.in_kev:
             blended = max(blended, self.cfg.kev_floor)

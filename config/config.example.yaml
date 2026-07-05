@@ -81,6 +81,3 @@ scoring:
     chaining: 0.15       # membership in a multi-step attack chain
   # A finding in the KEV catalog is floored to at least this score.
   kev_floor: 85
-  # Additive bonus (points) for findings implicated by the service threat model
-  # (needs threat_model.enabled). Additive, so threatless runs aren't penalized.
-  threat_boost: 15

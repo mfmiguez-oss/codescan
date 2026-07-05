@@ -73,7 +73,7 @@ def main() -> None:
     box(ax, 636, 262, 270, 58, "Enrich (pluggable)", "KEV · EPSS · reach · AI", NEUTRAL)
     # row B
     box(ax, 64, 352, 270, 58, "Exploitability + chaining", "AI · Opus 4.8 / Fable 5", AI)
-    box(ax, 350, 352, 270, 58, "Composite score", "sev·exploit·exposure·chain·threat", NEUTRAL)
+    box(ax, 350, 352, 270, 58, "Composite score", "severity·exploit·exposure·chain", NEUTRAL)
     box(ax, 636, 352, 270, 58, "Validation states", "proposed · analyst-confirmed", NEUTRAL)
 
     arrow(ax, (199, 238), (199, 262))

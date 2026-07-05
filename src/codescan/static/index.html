@@ -484,7 +484,6 @@ function renderConfig() {
       <div class="formrow"><label>Exposure</label>${wnum('w-exposure', w.exposure)}</div>
       <div class="formrow"><label>Chaining</label>${wnum('w-chain', w.chaining)}</div>
       <div class="formrow"><label>KEV floor</label><input type="number" id="kev-floor" value="${c.scoring.kev_floor}"/></div>
-      <div class="formrow"><label>Threat boost</label><input type="number" id="threat-boost" value="${c.scoring.threat_boost}"/></div>
     </div>
     <div class="card">
       <h4>ServiceNow</h4>
@@ -518,7 +517,7 @@ async function saveConfig() {
     ai: { model: $('#ai-model').value, effort: $('#ai-effort').value, max_tokens: Number($('#ai-max').value), tasks },
     enrichment: { kev_enabled: $('#en-kev').checked, epss_enabled: $('#en-epss').checked, reachability_enabled: $('#en-reach').checked, ai_enabled: $('#en-ai').checked },
     threat_model: { enabled: $('#tm-enabled').checked },
-    scoring: { weights: { severity: Number($('#w-sev').value), exploitability: Number($('#w-exp').value), exposure: Number($('#w-exposure').value), chaining: Number($('#w-chain').value) }, kev_floor: Number($('#kev-floor').value), threat_boost: Number($('#threat-boost').value) },
+    scoring: { weights: { severity: Number($('#w-sev').value), exploitability: Number($('#w-exp').value), exposure: Number($('#w-exposure').value), chaining: Number($('#w-chain').value) }, kev_floor: Number($('#kev-floor').value) },
     servicenow: { push: $('#sn-push').checked, format: $('#sn-format').value },
   };
   const r = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(update) });

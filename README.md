@@ -130,11 +130,11 @@ config):
 | chaining | membership in a scored attack chain |
 
 Anything in the KEV catalog is floored to `kev_floor` — *actively exploited*
-outweighs modelling. Multi-scanner agreement adds a small confidence bump. And
-when threat modeling is on, findings implicated by a service's threats get an
-additive **threat boost** (up to `threat_boost`, default 15) and their
-exploitability is enriched — threat models feed the score, they don't just
-report (see [Threat modeling](#threat-modeling)).
+outweighs modelling. Multi-scanner agreement adds a small confidence bump. When
+threat modeling is on, a threatened finding's **threat signal** enriches the
+exploitability dimension above — so threat models feed the score (counted once,
+not double-weighted) rather than just reporting (see
+[Threat modeling](#threat-modeling)).
 
 ## Install
 
