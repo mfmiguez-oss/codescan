@@ -600,6 +600,7 @@ function renderConfig() {
       <div class="formrow"><label>Command</label><input type="text" id="oh-cmd" style="width:420px" value="${esc(c.openhack.command || '')}" placeholder="empty = built-in engine · or: bash run_openhack.sh {repo_path} {output_dir}"/></div>
       <div class="formrow"><label>Workspace</label><input type="text" id="oh-ws" style="width:260px" value="${esc(c.openhack.workspace || '')}" placeholder=".openhack"/></div>
       <div class="formrow"><label>Clone repo first</label><input type="checkbox" id="oh-clone" ${c.openhack.clone ? 'checked' : ''}/></div>
+      <div class="formrow"><label>Review passes</label><input type="number" id="oh-passes" style="width:100px" value="${c.openhack.passes || 2}"/> <span class="muted" style="font-size:12px">≥2 unions findings across passes (higher recall) + flags agreement</span></div>
       <div class="formrow"><label>Max files</label><input type="number" id="oh-maxfiles" style="width:100px" value="${c.openhack.max_files || 60}"/> <span class="muted" style="font-size:12px">built-in engine: cap source files reviewed</span></div>
       <div class="formrow"><label>Min confidence</label><select id="oh-minconf">${['low','medium','high'].map(v=>`<option value="${v}" ${((c.openhack.min_confidence||'low')===v)?'selected':''}>${v}</option>`).join('')}</select> <span class="muted" style="font-size:12px">drop lower-confidence candidates</span></div>
     </div>
@@ -649,7 +650,7 @@ async function saveConfig() {
     ai: { provider: $('#ai-provider').value, model: $('#ai-model').value, effort: $('#ai-effort').value, max_tokens: Number($('#ai-max').value), max_concurrency: Number($('#ai-conc').value), auto_route: $('#ai-auto').checked, tasks },
     enrichment: { kev_enabled: $('#en-kev').checked, epss_enabled: $('#en-epss').checked, reachability_enabled: $('#en-reach').checked, ai_enabled: $('#en-ai').checked },
     threat_model: { enabled: $('#tm-enabled').checked },
-    openhack: { enabled: $('#oh-enabled').checked, findings_dir: $('#oh-dir').value, repo: $('#oh-repo').value, auto: $('#oh-auto').checked, command: $('#oh-cmd').value, workspace: $('#oh-ws').value, clone: $('#oh-clone').checked, max_files: Number($('#oh-maxfiles').value), min_confidence: $('#oh-minconf').value },
+    openhack: { enabled: $('#oh-enabled').checked, findings_dir: $('#oh-dir').value, repo: $('#oh-repo').value, auto: $('#oh-auto').checked, command: $('#oh-cmd').value, workspace: $('#oh-ws').value, clone: $('#oh-clone').checked, passes: Number($('#oh-passes').value), max_files: Number($('#oh-maxfiles').value), min_confidence: $('#oh-minconf').value },
     source: { provider: $('#scm-provider').value, github_repos: splitList($('#gh-repos').value), github_orgs: splitList($('#gh-orgs').value) },
     scoring: { weights: { severity: Number($('#w-sev').value), exploitability: Number($('#w-exp').value), exposure: Number($('#w-exposure').value), chaining: Number($('#w-chain').value) }, kev_floor: Number($('#kev-floor').value) },
     servicenow: { push: $('#sn-push').checked, format: $('#sn-format').value },

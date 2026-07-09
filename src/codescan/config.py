@@ -117,6 +117,11 @@ class OpenHackConfig(BaseModel):
     clone: bool = True          # git clone the target repo before running
 
     # --- built-in engine tuning (ignored when an external `command` is set) ---
+    # Number of independent review passes over the source. AI source review is
+    # non-deterministic, so >=2 passes raises recall (union of findings = fewer
+    # vulnerabilities missed) and flags cross-pass agreement as a confidence signal.
+    # 1 = single pass (cheapest); 2+ recommended. Each pass is another set of calls.
+    passes: int = 2
     max_files: int = 60         # cap source files reviewed per repo (cost/latency)
     max_file_bytes: int = 60000  # skip files larger than this (bytes)
     batch_chars: int = 48000    # per-request source budget (chars) across files

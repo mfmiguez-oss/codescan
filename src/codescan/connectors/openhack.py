@@ -65,6 +65,16 @@ class OpenHackConnector:
         if f.get("example_attack"):
             desc = f"{desc}\n\nExample: {f['example_attack']}".strip()
 
+        # Extra tags emitted by the producer (e.g. the engine's cross-pass
+        # `corroborated` / `single-pass` agreement signal). Accepted at the
+        # candidate or finding level; unknown shape is ignored.
+        extra = [
+            str(t)
+            for src in (item.get("tags"), f.get("tags"))
+            if isinstance(src, list)
+            for t in src
+        ]
+
         return Finding(
             source=Source.openhack,
             source_ref=str(item.get("candidate_id") or f.get("title", "")),
@@ -74,5 +84,5 @@ class OpenHackConnector:
             location=Location(repo=repo, path=path),
             description=desc,
             remediation=f.get("recommended_fix", ""),
-            tags=list(dict.fromkeys(t for t in ["openhack", vclass, expert] if t)),
+            tags=list(dict.fromkeys(t for t in ["openhack", vclass, expert, *extra] if t)),
         )

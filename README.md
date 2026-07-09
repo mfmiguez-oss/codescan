@@ -360,6 +360,17 @@ access control, SSRF, path traversal, deserialization, hardcoded secrets, …).
 Route its model/effort via the `openhack` task (defaults to the deep default
 tier; set `claude-fable-5` for the deepest review).
 
+**Multiple passes for recall.** AI source review is non-deterministic — a single
+pass can miss a real issue. The engine runs `openhack.passes` **independent review
+passes** (default **2**) and **unions** the results, so a vulnerability found in
+*any* pass is reported: more passes → fewer missed. Duplicate findings across
+passes are consolidated (keyed on file + vulnerability class + title), keeping the
+strongest severity/confidence seen and recording how many passes agreed. That
+agreement is a **confidence signal**: a finding seen in every pass is tagged
+`corroborated`, one seen in a single pass `single-pass`, and the count ("identified
+in 2 of 2 … passes") is noted on the finding. Set `passes: 1` for a single cheap
+pass; each extra pass is another set of model calls, so it trades cost for recall.
+
 **Auto-run — external OpenHack.** To use a separate OpenHack install instead, set
 `command` to your invocation; `{repo_path}` / `{output_dir}` are substituted and
 the AI-provider env vars pass through to the subprocess:

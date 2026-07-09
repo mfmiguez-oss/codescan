@@ -95,6 +95,7 @@ def sanitized_config(cfg: Config) -> dict:
             "engine": "external" if cfg.openhack.command else "built-in",
             "workspace": cfg.openhack.workspace,
             "clone": cfg.openhack.clone,
+            "passes": cfg.openhack.passes,
             "max_files": cfg.openhack.max_files,
             "max_file_bytes": cfg.openhack.max_file_bytes,
             "min_confidence": cfg.openhack.min_confidence,
@@ -184,6 +185,8 @@ def apply_config(cfg: Config, update: dict) -> None:
         cfg.openhack.workspace = ".openhack"
     _set_bool(cfg.openhack, oh, "clone")
     # Built-in engine tuning.
+    if oh.get("passes"):
+        cfg.openhack.passes = max(1, int(oh["passes"]))
     if oh.get("max_files"):
         cfg.openhack.max_files = max(1, int(oh["max_files"]))
     if oh.get("max_file_bytes"):

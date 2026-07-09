@@ -93,6 +93,8 @@ openhack:
   command: []
   # Built-in engine tuning (ignored when `command` is set). Route model/effort via
   # ai.tasks.openhack (defaults to the deep default tier).
+  passes: 2              # independent review passes; >=2 unions findings (higher
+                         # recall) and flags cross-pass agreement. 1 = single pass.
   max_files: 60          # cap source files reviewed per repo
   max_file_bytes: 60000  # skip files larger than this
   min_confidence: low    # drop candidates below this confidence: low | medium | high

@@ -13,14 +13,22 @@ from codescan.openhack_engine import OpenHackEngine
 
 
 class FakeLLM:
-    """Stands in for LLMClient — records calls, returns a canned finding."""
+    """Stands in for LLMClient — records calls, returns a canned finding.
 
-    def __init__(self, findings):
+    `per_call` (optional) supplies a different finding list for each successive
+    call, so tests can simulate non-deterministic passes (a finding one pass sees
+    and another misses).
+    """
+
+    def __init__(self, findings, per_call=None):
         self.findings = findings
+        self.per_call = list(per_call) if per_call is not None else None
         self.calls = []
 
     def complete_json(self, task, system, user, schema, **kwargs):
         self.calls.append({"task": task, "user": user, **kwargs})
+        if self.per_call is not None:
+            return {"findings": self.per_call[len(self.calls) - 1]}
         return {"findings": self.findings}
 
 
@@ -69,6 +77,39 @@ def test_engine_skips_dependency_dirs(tmp_path):
     sent = "\n".join(c["user"] for c in llm.calls)
     assert "auth_controller.py" in sent
     assert "node_modules" not in sent and "module.exports" not in sent
+
+
+def _cand(title, cls="injection", conf="high", sev="high", path="src/auth_controller.py"):
+    return {"title": title, "severity": sev, "confidence": conf,
+            "primary_vulnerability_class": cls, "target_path": path,
+            "summary": "s", "impact": "i", "example_attack": "a", "recommended_fix": "f"}
+
+
+def test_multi_pass_unions_findings_for_recall(tmp_path):
+    repo = _repo_tree(tmp_path / "repo")
+    A, B = _cand("SQLi in login"), _cand("Path traversal in export", cls="path-traversal")
+    # Pass 1 finds A+B; pass 2 (non-deterministic) finds only A.
+    llm = FakeLLM(findings=None, per_call=[[A, B], [A]])
+    cfg = OpenHackConfig(passes=2)
+    out_dir = OpenHackEngine(llm, cfg).review(repo, tmp_path / "out", "a/b")
+
+    findings = {f.title: f for f in OpenHackConnector().from_dir(out_dir, "a/b")}
+    # Union across passes -> B is not dropped just because pass 2 missed it.
+    assert set(findings) == {"SQLi in login", "Path traversal in export"}
+    # Cross-pass agreement is surfaced as a confidence tag + note.
+    assert "corroborated" in findings["SQLi in login"].tags          # seen in 2/2
+    assert "single-pass" in findings["Path traversal in export"].tags  # seen in 1/2
+    assert "2 of 2" in findings["SQLi in login"].description
+
+
+def test_single_pass_has_no_agreement_signal(tmp_path):
+    repo = _repo_tree(tmp_path / "repo")
+    llm = FakeLLM([_cand("SQLi in login")])
+    out_dir = OpenHackEngine(llm, OpenHackConfig(passes=1)).review(repo, tmp_path / "out", "a/b")
+    f = OpenHackConnector().from_dir(out_dir, "a/b")[0]
+    assert "corroborated" not in f.tags and "single-pass" not in f.tags
+    assert "Review agreement" not in f.description
+    assert len(llm.calls) == 1
 
 
 def test_engine_respects_min_confidence(tmp_path):

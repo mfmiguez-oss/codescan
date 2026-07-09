@@ -47,6 +47,16 @@ def test_bare_finding_and_severity_mapping(tmp_path):
     assert f.title == "Info leak"
 
 
+def test_candidate_tags_merged(tmp_path):
+    # Producer-supplied tags (e.g. the engine's cross-pass agreement signal) flow
+    # onto the Finding alongside the built-in openhack/class tags.
+    cand = {"candidate_id": "OH-0001", "primary_vulnerability_class": "injection",
+            "tags": ["corroborated"],
+            "finding": {"title": "SQLi", "severity": "high", "target_path": "a.java"}}
+    f = OpenHackConnector().from_file(_write(tmp_path, "c.json", cand), "a/b")[0]
+    assert "corroborated" in f.tags and "openhack" in f.tags and "injection" in f.tags
+
+
 def test_from_dir_reads_finding_candidates(tmp_path):
     fc = tmp_path / "finding-candidates"
     fc.mkdir()

@@ -47,6 +47,10 @@ _DEFAULT_SKIP_DIRS = frozenset({
 
 # Path fragments that tend to carry the security-relevant logic — reviewed first
 # so the file budget is spent where findings are most likely.
+# Orderings for cross-pass consolidation (keep the strongest signal seen).
+_SEV_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "informational": 0, "info": 0, "unknown": 0}
+_CONF_RANK = {"high": 2, "medium": 1, "low": 0}
+
 _PRIORITY_HINTS = (
     "auth", "login", "session", "token", "password", "crypto", "secret",
     "admin", "api", "controller", "handler", "route", "view", "query", "sql",
@@ -134,8 +138,15 @@ class OpenHackEngine:
     def review(self, repo_path: str | Path, out_dir: str | Path, repo: str = "") -> str:
         """Review the source tree at ``repo_path`` and write finding candidates.
 
-        Returns the output directory (the same one passed in), so callers can
-        hand it straight to `OpenHackConnector.from_dir`.
+        Runs `cfg.passes` independent review passes (default 2) and **unions** the
+        results: because AI source review is non-deterministic, a single pass can
+        miss real issues, so multiple passes raise recall. Duplicate findings across
+        passes are consolidated (keyed on path + class + title), keeping the highest
+        severity/confidence seen and recording how many passes agreed — a confidence
+        signal surfaced as a `corroborated` tag and a note in the finding.
+
+        Returns the output directory (the same one passed in), so callers can hand
+        it straight to `OpenHackConnector.from_dir`.
         """
         root = Path(repo_path)
         out = Path(out_dir)
@@ -143,11 +154,14 @@ class OpenHackEngine:
         fc_dir.mkdir(parents=True, exist_ok=True)
 
         files = self._select_files(root)
-        section = 0
-        for batch in self._batches(files, root):
-            section += 1
-            result = self._review_batch(section, batch, repo or root.name)
-            self._write_candidates(fc_dir, section, result)
+        passes = max(1, self.cfg.passes)
+        consolidated: dict[tuple[str, str, str], dict] = {}
+        for _ in range(passes):
+            for batch in self._batches(files, root):
+                result = self._review_batch(batch, repo or root.name)
+                for finding in result.get("findings", []):
+                    self._merge(consolidated, finding)
+        self._write_candidates(fc_dir, consolidated, passes)
         return str(out)
 
     # --- file selection ---------------------------------------------------
@@ -201,7 +215,7 @@ class OpenHackEngine:
             yield batch
 
     # --- one LLM review pass ---------------------------------------------
-    def _review_batch(self, section: int, batch: list[tuple[str, str]], repo: str) -> dict:
+    def _review_batch(self, batch: list[tuple[str, str]], repo: str) -> dict:
         blocks = [
             f"=== FILE: {rel} ===\n{text}" for rel, text in batch
         ]
@@ -217,25 +231,61 @@ class OpenHackEngine:
             self.TASK, _SYSTEM, user, _SCHEMA, difficulty=size_difficulty(len(batch)),
         )
 
+    # --- cross-pass consolidation ----------------------------------------
+    def _merge(self, acc: dict[tuple[str, str, str], dict], f: dict) -> None:
+        """Fold one raw finding into the consolidation map, keyed on identity.
+
+        Same weakness in the same file (path + vulnerability class + title) reported
+        across passes collapses into one entry; distinct titles stay separate (union
+        favors recall). Keeps the strongest severity/confidence seen and counts how
+        many passes reported it.
+        """
+        path = f.get("target_path", "") or ""
+        vclass = (f.get("primary_vulnerability_class") or "unknown")
+        title = f.get("title", "OpenHack finding")
+        key = (path, vclass.lower(), title.strip().lower())
+        cur = acc.get(key)
+        if cur is None:
+            acc[key] = {"finding": dict(f), "passes": 1}
+            return
+        cur["passes"] += 1
+        best = cur["finding"]
+        if _SEV_RANK.get((f.get("severity") or "").lower(), 0) > _SEV_RANK.get((best.get("severity") or "").lower(), 0):
+            best["severity"] = f.get("severity")
+        if _CONF_RANK.get((f.get("confidence") or "").lower(), 0) > _CONF_RANK.get((best.get("confidence") or "").lower(), 0):
+            best["confidence"] = f.get("confidence")
+
     # --- persistence: OpenHack finding-candidate envelope -----------------
-    def _write_candidates(self, fc_dir: Path, section: int, result: dict) -> None:
-        min_conf = self.cfg.min_confidence.lower()
-        rank = {"low": 0, "medium": 1, "high": 2}
-        threshold = rank.get(min_conf, 0)
-        for i, f in enumerate(result.get("findings", []), start=1):
-            if rank.get((f.get("confidence") or "low").lower(), 0) < threshold:
+    def _write_candidates(self, fc_dir: Path, acc: dict[tuple[str, str, str], dict], passes: int) -> None:
+        threshold = _CONF_RANK.get(self.cfg.min_confidence.lower(), 0)
+        n = 0
+        # Stable order (by key) -> deterministic candidate ids across runs.
+        for _, entry in sorted(acc.items()):
+            f = entry["finding"]
+            found = entry["passes"]
+            if _CONF_RANK.get((f.get("confidence") or "low").lower(), 0) < threshold:
                 continue
+            n += 1
+            candidate_id = f"OH-{n:04d}"
             vclass = f.get("primary_vulnerability_class", "") or "unknown"
-            candidate_id = f"S{section:03d}-F{i:03d}"
+            summary = f.get("summary", "")
+            tags = ["openhack"]
+            if passes > 1:
+                summary = (
+                    f"{summary}\n\nReview agreement: identified in {found} of {passes} "
+                    "independent whitebox review passes."
+                ).strip()
+                tags.append("corroborated" if found >= 2 else "single-pass")
             envelope = {
                 "candidate_id": candidate_id,
                 "expert": vclass,
                 "primary_vulnerability_class": vclass,
+                "tags": tags,
                 "finding": {
                     "title": f.get("title", "OpenHack finding"),
                     "severity": f.get("severity", "unknown"),
                     "target_path": f.get("target_path", ""),
-                    "summary": f.get("summary", ""),
+                    "summary": summary,
                     "impact": f.get("impact", ""),
                     "example_attack": f.get("example_attack", ""),
                     "recommended_fix": f.get("recommended_fix", ""),
