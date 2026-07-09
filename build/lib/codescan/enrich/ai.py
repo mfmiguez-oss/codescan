@@ -1,4 +1,4 @@
-"""AI enricher — remediation guidance + tags (cheap tier).
+"""AI enricher — remediation guidance + tags (lower-cost tier).
 
 Complements the exploitability engine rather than duplicating it: that engine
 scores exploitability and finds chains; this one adds analyst-facing context —

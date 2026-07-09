@@ -14,6 +14,24 @@ from enum import Enum
 from pydantic import BaseModel, Field
 
 
+def group_findings_by_repo(findings: list["Finding"]) -> dict[str, list["Finding"]]:
+    """Group findings by repository for per-service AI analysis."""
+    by_repo: dict[str, list[Finding]] = {}
+    for finding in findings:
+        by_repo.setdefault(finding.location.repo, []).append(finding)
+    return by_repo
+
+
+def finding_component_label(finding: "Finding") -> str:
+    """Return a stable component label like name@version."""
+    return f"{finding.component.name}@{finding.component.version or ''}"
+
+
+def finding_location_label(finding: "Finding") -> str:
+    """Return a compact repo:path label used by AI payloads."""
+    return f"{finding.location.repo}:{finding.location.path or ''}"
+
+
 class Severity(str, Enum):
     critical = "critical"
     high = "high"

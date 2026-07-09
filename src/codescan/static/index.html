@@ -515,7 +515,7 @@ function renderOverview() {
       <ol class="usage">
         <li><b>Configure</b> — in <a onclick="switchView('config')">Config</a>, choose the repo source (Bitbucket / GitHub), route model tiers, toggle enrichment and threat modeling, and set scoring. Secrets stay in the environment.</li>
         <li><b>Run</b> — set the header toggles (<b>AI</b> for exploitability / chaining / threat modeling, <b>live</b> to scan real Bitbucket/Snyk/Xray, <b>offline</b> to skip KEV/EPSS) and click <b>Run scan</b>.</li>
-        <li><b>Triage</b> — in <a onclick="switchView('findings')">Findings</a>, filter and open a finding for its exploitability, remediation, tags, threats and chains; set its validation state (decisions are sticky across re-scans).</li>
+        <li><b>Triage</b> — in <a onclick="switchView('findings')">Findings</a>, filter and open a finding for its exploitability, remediation, tags, threats and chains; set its validation state (decisions persist across rescans).</li>
         <li><b>Threats</b> — <a onclick="switchView('threats')">per-service STRIDE models</a> link threats to the findings and chains that evidence them.</li>
         <li><b>Export</b> — download the ServiceNow feed (JSON / CSV) above, or enable push in Config to send it to your instance.</li>
       </ol>
@@ -571,7 +571,7 @@ function renderConfig() {
     </div>
     <div class="card">
       <h4>Model routing by task</h4>
-      <p class="hint">Route each task to any provider + model. Cheap models for mechanical work (dedup, enrichment), deep models for reasoning (exploitability, threat_model). Blank inherits the default tier. Effort applies to Anthropic; other providers ignore it.</p>
+      <p class="hint">Route each task to any provider + model. Lower-cost models for mechanical work (dedup, enrichment), deep models for reasoning (exploitability, threat_model). Blank inherits the default tier. Effort applies to Anthropic; other providers ignore it.</p>
       <div class="grid5"><div class="h">Task</div><div class="h">Provider</div><div class="h">Model</div><div class="h">Effort</div><div class="h">Max tokens</div></div>
       ${tasksHtml}
     </div>

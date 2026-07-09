@@ -3,7 +3,7 @@
 Wraps the pipeline in a small HTTP API and serves the single-page analyst
 dashboard. It holds the latest scan result in memory; the UI reads it, drills
 into exploitability and attack chains, and changes validation states (which
-persist to the state store so triage sticks across re-scans).
+persist to the state store so triage persists across rescans).
 
 Defaults are offline + no-AI so `codescan serve` works against the sample
 fixtures with no credentials. A scan can be re-triggered with different options
@@ -42,6 +42,19 @@ SCM_PROVIDERS = ["bitbucket", "github"]
 
 def _mask(secret: str) -> str:
     return "••••••••" if secret else ""
+
+
+def _set_bool(target: object, update: dict, field: str) -> None:
+    if field in update:
+        setattr(target, field, bool(update[field]))
+
+
+def _set_str(target: object, update: dict, field: str, *, strip: bool = True) -> None:
+    if field in update:
+        value = update[field]
+        if isinstance(value, str) and strip:
+            value = value.strip()
+        setattr(target, field, str(value))
 
 
 def sanitized_config(cfg: Config) -> dict:
@@ -141,28 +154,24 @@ def apply_config(cfg: Config, update: dict) -> None:
 
     en = update.get("enrichment", {})
     for key in ("kev_enabled", "epss_enabled", "reachability_enabled", "ai_enabled"):
-        if key in en:
-            setattr(cfg.enrichment, key, bool(en[key]))
+        _set_bool(cfg.enrichment, en, key)
 
-    if "enabled" in update.get("threat_model", {}):
-        cfg.threat_model.enabled = bool(update["threat_model"]["enabled"])
+    threat_model = update.get("threat_model", {})
+    if "enabled" in threat_model:
+        cfg.threat_model.enabled = bool(threat_model["enabled"])
 
     oh = update.get("openhack", {})
-    if "enabled" in oh:
-        cfg.openhack.enabled = bool(oh["enabled"])
-    if "findings_dir" in oh:
-        cfg.openhack.findings_dir = str(oh["findings_dir"]).strip()
-    if "repo" in oh:
-        cfg.openhack.repo = str(oh["repo"]).strip()
-    if "auto" in oh:
-        cfg.openhack.auto = bool(oh["auto"])
+    _set_bool(cfg.openhack, oh, "enabled")
+    _set_str(cfg.openhack, oh, "findings_dir")
+    _set_str(cfg.openhack, oh, "repo")
+    _set_bool(cfg.openhack, oh, "auto")
     if "command" in oh:
         cmd = oh["command"]
         cfg.openhack.command = cmd if isinstance(cmd, list) else shlex.split(cmd or "")
-    if "workspace" in oh:
-        cfg.openhack.workspace = str(oh["workspace"]).strip() or ".openhack"
-    if "clone" in oh:
-        cfg.openhack.clone = bool(oh["clone"])
+    _set_str(cfg.openhack, oh, "workspace")
+    if cfg.openhack.workspace == "":
+        cfg.openhack.workspace = ".openhack"
+    _set_bool(cfg.openhack, oh, "clone")
 
     src = update.get("source", {})
     if "provider" in src:
@@ -176,8 +185,7 @@ def apply_config(cfg: Config, update: dict) -> None:
         cfg.github.orgs = [str(o).strip() for o in src["github_orgs"] if str(o).strip()]
 
     sn = update.get("servicenow", {})
-    if "push" in sn:
-        cfg.servicenow.push = bool(sn["push"])
+    _set_bool(cfg.servicenow, sn, "push")
     if "format" in sn:
         fmt = str(sn["format"]).lower()
         if fmt not in ("json", "csv"):
@@ -272,9 +280,9 @@ class AppState:
             apply_config(self.cfg, json.loads(self.overrides_path.read_text(encoding="utf-8")))
         self.result: PipelineResult = PipelineResult()
         self.startup_error: str | None = None
-        # Don't crash the server if the initial scan fails (e.g. live mode with
-        # missing credentials). Boot empty; the operator can fix config and
-        # re-scan from the UI.
+        # Avoid failing server startup if the initial scan fails (e.g. live mode
+        # with missing credentials). Boot empty; the operator can fix config and
+        # retry from the UI.
         try:
             self.scan()
         except Exception as exc:  # noqa: BLE001 - surface, don't fail startup
@@ -358,7 +366,7 @@ def create_app(
 
     @app.get("/healthz")
     def healthz() -> dict:
-        # Liveness/readiness probe — cheap, no scan.
+        # Liveness/readiness probe — no scan performed.
         return {"status": "ok"}
 
     @app.get("/api/state")
@@ -367,8 +375,9 @@ def create_app(
 
     @app.post("/api/scan")
     def scan(req: ScanRequest) -> dict:
-        # Surface scan failures (e.g. live mode, bad creds) as an error banner
-        # rather than a 500 — the previous result stays visible.
+        # Surface scan failures (e.g. live mode, invalid credentials) as an
+        # error banner rather than a 500 response — the previous result stays
+        # visible.
         try:
             state.scan(req.use_ai, req.offline, req.live)
         except Exception as exc:  # noqa: BLE001

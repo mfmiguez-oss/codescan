@@ -90,13 +90,13 @@ def main() -> None:
     label(40, 480, "OUTPUTS")
     box(ax, 70, 490, 190, 58, "ServiceNow VR", "JSON / CSV · idempotent", IO)
     box(ax, 285, 490, 140, 58, "Web UI / API", "analyst triage", IO)
-    box(ax, 445, 490, 135, 58, "State store", "sticky decisions", NEUTRAL)
+    box(ax, 445, 490, 135, 58, "State store", "persistent decisions", NEUTRAL)
     box(ax, 690, 490, 220, 58, "Threat models", "STRIDE · per-service (AI)", AI)
 
     arrow(ax, (730, 410), (170, 488))    # -> ServiceNow
     arrow(ax, (752, 410), (350, 488))    # -> Web UI
     arrow(ax, (788, 410), (800, 488))    # -> Threat models (AI)
-    # sticky feedback loop: Web UI -> state store -> validation
+    # persistent feedback loop: Web UI -> state store -> validation
     arrow(ax, (425, 517), (445, 517), color=BLUE, dashed=True)
     ax.plot([512, 512, 700], [490, 442, 414], color=BLUE, linewidth=1.8,
             linestyle=(0, (5, 4)), zorder=1)

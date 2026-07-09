@@ -1,19 +1,19 @@
-"""AI enricher — remediation guidance + tags (cheap tier).
+"""AI enricher — remediation guidance + tags (lower-cost tier).
 
 Complements the exploitability engine rather than duplicating it: that engine
 scores exploitability and finds chains; this one adds analyst-facing context —
 concrete remediation steps, categorization tags (OWASP class, direct vs
 transitive, weakness family), and a reachability judgement when the scanner gave
-no signal. Routed to the "enrichment" task (Haiku by default), batched per repo.
+no signal. Routed to the enrichment task (Haiku by default) and batched per
+repository.
 """
 
 from __future__ import annotations
 
 import json
-from collections import defaultdict
 
 from ..llm import LLMClient
-from ..models import Finding
+from ..models import Finding, finding_component_label, group_findings_by_repo
 from .base import BaseEnricher
 
 _SCHEMA = {
@@ -55,7 +55,7 @@ def _digest(f: Finding) -> dict:
         "title": f.title,
         "cves": f.cve_ids,
         "cwes": f.cwe_ids,
-        "component": f"{f.component.name}@{f.component.version}",
+        "component": finding_component_label(f),
         "fixed_in": f.fixed_in,
         "description": f.description[:400],
     }
@@ -68,9 +68,7 @@ class AIEnricher(BaseEnricher):
         self.llm = llm
 
     def enrich(self, findings: list[Finding]) -> None:
-        by_repo: dict[str, list[Finding]] = defaultdict(list)
-        for f in findings:
-            by_repo[f.location.repo].append(f)
+        by_repo = group_findings_by_repo(findings)
         by_id = {f.id: f for f in findings}
         for repo, group in by_repo.items():
             self._apply(self._ask(repo, group), by_id)

@@ -7,7 +7,7 @@ analyst sees *why* the tool ranked it where it did.
 
 `correlation_id` is the finding fingerprint, which makes the import idempotent:
 re-runs upsert the same VI instead of creating duplicates, and closed items
-stay closed (see the sticky states in `validation.py`).
+remain closed (see the persisted states in `validation.py`).
 """
 
 from __future__ import annotations

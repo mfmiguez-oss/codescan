@@ -12,8 +12,8 @@ ai:
   effort: high            # low | medium | high | xhigh | max (Anthropic; ignored elsewhere)
   max_tokens: 32000
 
-  # Per-task model routing: cheap models for mechanical work, deep models for
-  # reasoning. Unset fields inherit the default tier above. Built-in defaults
+  # Per-task model routing: lower-cost models for mechanical work, deep models
+  # for reasoning. Unset fields inherit the default tier above. Built-in defaults
   # (in llm.py) already route dedup -> Haiku, so this block is optional.
   tasks:
     dedup:                # semantic near-duplicate detection (mechanical)
@@ -29,7 +29,7 @@ ai:
       # model: gpt-5
       # provider: google
       # model: gemini-2.5-pro
-    enrichment:           # AI remediation guidance + tags (cheap, mechanical)
+    enrichment:           # AI remediation guidance + tags (lower-cost, mechanical)
       model: claude-haiku-4-5
 
 # Which SCM provides the repo inventory (scan surface).

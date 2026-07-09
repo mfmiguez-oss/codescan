@@ -35,6 +35,14 @@ class LLMProvider:
         raise NotImplementedError
 
 
+def build_json_instruction(req: CompletionRequest) -> str:
+    """Return the shared schema-guidance text appended to provider prompts."""
+    return (
+        "Respond ONLY with a single JSON object matching this schema:\n"
+        + json.dumps(req.schema)
+    )
+
+
 def extract_json(text: str) -> dict:
     """Best-effort parse of a JSON object from model text (fences, prose, etc.)."""
     text = (text or "").strip()

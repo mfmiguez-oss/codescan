@@ -16,6 +16,13 @@ app = typer.Typer(add_completion=False, help="Enterprise code-scanning pipeline.
 console = Console()
 
 
+def _print_chain(chain: dict) -> None:
+    console.print(
+        f"  [{chain['chain_id']}] score {chain.get('chain_score')} "
+        f"({chain.get('likelihood')}): {chain.get('narrative', '')[:120]}"
+    )
+
+
 @app.command()
 def scan(
     config: str = typer.Option("config/config.example.yaml", help="Path to config YAML."),
@@ -64,11 +71,8 @@ def scan(
 
     if result.chains:
         console.print("\n[bold]Attack chains[/bold]")
-        for c in result.chains:
-            console.print(
-                f"  [{c['chain_id']}] score {c.get('chain_score')} "
-                f"({c.get('likelihood')}): {c.get('narrative', '')[:120]}"
-            )
+        for chain in result.chains:
+            _print_chain(chain)
 
     console.print(f"\nServiceNow import written to [green]{out}[/green]")
 

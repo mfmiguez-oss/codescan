@@ -9,7 +9,7 @@ from codescan.config import AIConfig, TaskModel
 from codescan.llm import LLMClient, ModelRouter
 from codescan.providers import PROVIDERS, get_provider
 from codescan.providers.anthropic_provider import AnthropicProvider
-from codescan.providers.base import extract_json
+from codescan.providers.base import CompletionRequest, build_json_instruction, extract_json
 from codescan.providers.google_provider import GoogleProvider
 from codescan.providers.openai_provider import OpenAIProvider
 
@@ -30,6 +30,20 @@ def test_extract_json_variants():
     assert extract_json('Sure — here it is: {"a": 1}. Done.') == {"a": 1}
     with pytest.raises(RuntimeError):
         extract_json("no json here")
+
+
+def test_build_json_instruction_includes_schema():
+    req = CompletionRequest(
+        model="gpt-4.1",
+        system="system prompt",
+        user="user prompt",
+        schema={"type": "object", "properties": {"ok": {"type": "boolean"}}},
+    )
+
+    instruction = build_json_instruction(req)
+
+    assert instruction.startswith("Respond ONLY with a single JSON object matching this schema:")
+    assert '"type": "object"' in instruction
 
 
 def test_llmclient_dispatches_to_routed_provider(monkeypatch):

@@ -9,9 +9,7 @@ across those endpoints.
 
 from __future__ import annotations
 
-import json
-
-from .base import CompletionRequest, LLMProvider, extract_json
+from .base import CompletionRequest, LLMProvider, build_json_instruction, extract_json
 
 
 class OpenAIProvider(LLMProvider):
@@ -34,11 +32,7 @@ class OpenAIProvider(LLMProvider):
         return self._client
 
     def complete_json(self, req: CompletionRequest) -> dict:
-        system = (
-            req.system
-            + "\n\nRespond ONLY with a single JSON object matching this schema:\n"
-            + json.dumps(req.schema)
-        )
+        system = req.system + "\n\n" + build_json_instruction(req)
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": req.user},

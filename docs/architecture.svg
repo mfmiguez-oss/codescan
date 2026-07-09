@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 660" width="2000" height="1320" role="img" font-family="Segoe UI, Roboto, system-ui, sans-serif">
   <title>codescan architecture</title>
-  <desc>Bitbucket, Snyk and Xray feed a pipeline that ingests, deduplicates (deterministic then AI/Haiku), enriches with KEV/EPSS/reachability, runs AI exploitability and attack-chain analysis (Opus/Fable), scores, and assigns validation states, then exports to ServiceNow VR and a web UI, with a sticky state store feeding back.</desc>
+  <desc>Bitbucket, Snyk and Xray feed a pipeline that ingests, deduplicates (deterministic then AI/Haiku), enriches with KEV/EPSS/reachability, runs AI exploitability and attack-chain analysis (Opus/Fable), scores, and assigns validation states, then exports to ServiceNow VR and a web UI, with a persistent state store feeding back.</desc>
 
   <rect x="0" y="0" width="1000" height="660" fill="#ffffff"/>
 
@@ -99,7 +99,7 @@
 
     <rect x="445" y="490" width="135" height="58" rx="8" fill="#eef2f7" stroke="#64748b"/>
     <text x="512" y="514" text-anchor="middle">State store</text>
-    <text x="512" y="532" text-anchor="middle" font-size="11" font-weight="400" fill="#64748b">sticky decisions</text>
+    <text x="512" y="532" text-anchor="middle" font-size="11" font-weight="400" fill="#64748b">persisted decisions</text>
 
     <rect x="690" y="490" width="220" height="58" rx="8" fill="#e8f0ff" stroke="#3b6fe0"/>
     <text x="800" y="514" text-anchor="middle" fill="#1d4ed8">Threat models</text>
@@ -126,7 +126,7 @@
     <rect x="330" y="600" width="16" height="16" rx="3" fill="#e8f0ff" stroke="#3b6fe0"/>
     <text x="354" y="612">AI stage (LLM) — routed by provider + tier (Anthropic / OpenAI / Google)</text>
     <path d="M700,608 L724,608" stroke="#3b6fe0" stroke-width="1.8" stroke-dasharray="5 4" fill="none" marker-end="url(#ahb)"/>
-    <text x="732" y="612">analyst feedback (sticky)</text>
+    <text x="732" y="612">analyst feedback (persistent)</text>
   </g>
 
   <defs>

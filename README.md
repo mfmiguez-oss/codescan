@@ -32,7 +32,7 @@ diagram is in [docs/architecture.svg](docs/architecture.svg) /
 | Code in a local Bitbucket install | `connectors/bitbucket.py` — on-prem REST API builds the repo inventory (the scan surface). **GitHub/GHES** (`connectors/github.py`) is a selectable alternative via `source.provider`. |
 | Snyk + Xray available | `connectors/snyk.py`, `connectors/xray.py` — live API pull **or** offline export files, both normalized to one `Finding` model. Hadrian **OpenHack** (`connectors/openhack.py`) is a third, whitebox source-review findings source. |
 | Output ready for ServiceNow Vulnerabilities | `servicenow.py` — `sn_vul_vulnerable_item` records with risk score, state, and reasoning; idempotent via `correlation_id`. |
-| Validation states | `validation.py` + `models.py` — internal lifecycle (`new → under_investigation → confirmed / false_positive / risk_accepted / duplicate / resolved`) mapped to ServiceNow VR states, with a sticky **state store** so re-scans never re-open closed items. |
+| Validation states | `validation.py` + `models.py` — internal lifecycle (`new → under_investigation → confirmed / false_positive / risk_accepted / duplicate / resolved`) mapped to ServiceNow VR states, with a persistent **state store** so rescans never re-open closed items. |
 | Deduplication | `dedup.py` — cross-scanner merge on a `(vuln id, component, repo)` fingerprint; keeps provenance from every scanner. |
 | Exploitability, incl. chaining, scored accordingly | `exploitability.py` (Claude) + `scoring.py` — per-finding exploitability and explicit attack chains feed a weighted composite score. |
 
@@ -45,7 +45,7 @@ criticality, exploit-DB) is a new subclass. Built-in enrichers:
 - **CISA KEV** — is the CVE in the Known Exploited Vulnerabilities catalog?
 - **FIRST EPSS** — probability of exploitation in the wild.
 - **Reachability** — is the vulnerable code path actually reachable?
-- **AI enrichment** (optional, cheap tier) — remediation guidance + tags per
+- **AI enrichment** (optional, lower-cost tier) — remediation guidance + tags per
   finding; complements the exploitability engine rather than duplicating it.
 
 The deterministic signals above answer *how dangerous is this CVE in general* and
@@ -85,7 +85,7 @@ ai:
   provider: anthropic          # default tier
   model: claude-opus-4-8
   tasks:
-    dedup:          { model: claude-haiku-4-5 }         # cheap, Anthropic
+    dedup:          { model: claude-haiku-4-5 }         # lower-cost, Anthropic
     exploitability: { provider: openai, model: gpt-5 }  # different supplier
     threat_model:   { provider: google, model: gemini-2.5-pro }
 ```
@@ -101,7 +101,7 @@ mechanical work is wasteful. `llm.py` routes each task to a provider + model:
 
 | Task | Default tier | Why |
 |---|---|---|
-| `dedup` (semantic near-duplicate detection) | **Haiku 4.5** | Mechanical "are these the same vuln?" judgement — cheap and fast. |
+| `dedup` (semantic near-duplicate detection) | **Haiku 4.5** | Mechanical "are these the same vulnerability?" judgement — cost-effective and fast. |
 | `exploitability` (per-finding + attack chains) | **Opus 4.8** | Deep, judgement-heavy reasoning. Bump to `claude-fable-5` for the hardest chaining. |
 
 The default tier (`ai.model`) covers any task without a specific route. Override
@@ -120,9 +120,9 @@ ai:
 ```
 
 The client adapts each request to the model's capabilities automatically —
-Haiku doesn't take `effort` or adaptive thinking, Fable gets refusal fallbacks —
-so callers just name a task and get the right model. Adding a new AI stage is a
-one-liner: give it a task name and (optionally) a built-in tier.
+Haiku doesn't accept `effort` or adaptive thinking; Fable receives refusal
+fallbacks — so callers just name a task and get the right model. Adding a new
+AI stage is a one-liner: give it a task name and (optionally) a built-in tier.
 
 Two dedup passes now run: the free deterministic fingerprint merge, then an
 optional Haiku-backed **semantic** pass that catches cross-scanner duplicates
@@ -196,8 +196,8 @@ cross-scanner provenance, fix versions, the AI exploitability rationale, and any
 attack chains it belongs to (narrative, preconditions, impact, MITRE ATT&CK).
 
 Analysts **change the validation state inline** (confirm, mark false positive,
-accept risk, …). Those decisions persist to the state store and are sticky — a
-re-scan never overturns an analyst's call.
+accept risk, …). Those decisions persist to the state store and are persisted — a
+rescan never overturns an analyst's call.
 
 A **Threats** tab shows the per-service **STRIDE threat models** (see below):
 threats linked to their findings and chains, assets, entry points, trust
@@ -349,12 +349,12 @@ src/codescan/
   connectors/          bitbucket / github (sources) · snyk / xray / openhack (findings)
   llm.py               model router (task -> tier) + shared structured client
   dedup.py             deterministic cross-scanner merge
-  dedup_ai.py          semantic near-duplicate merge (cheap tier / Haiku)
+  dedup_ai.py          semantic near-duplicate merge (lower-cost tier / Haiku)
   enrich/              KEV, EPSS, reachability
   exploitability.py    Claude exploitability + chaining engine (deep tier)
   threatmodel.py       per-service STRIDE threat modeling (deep tier)
   scoring.py           composite risk score
-  validation.py        validation-state machine + sticky state store
+  validation.py        validation-state machine + persistent state store
   servicenow.py        Vulnerable Item export (file or Table API push)
   web.py               FastAPI backend for the UI
   static/index.html    analyst triage dashboard (single-page, no build)
@@ -372,7 +372,7 @@ pytest
 
 The suite runs the deterministic pipeline over the fixtures and asserts the
 load-bearing behaviors: cross-scanner dedup, corroboration, reachability-driven
-scoring, validation states, ServiceNow record shape, and sticky closures.
+scoring, validation states, ServiceNow record shape, and persisted closures.
 
 ## Production notes
 
@@ -387,4 +387,4 @@ scoring, validation states, ServiceNow record shape, and sticky closures.
   (the finding fingerprint) makes imports idempotent.
 - **Human in the loop.** The pipeline *proposes* validation states; analysts
   confirm/override in ServiceNow. Closed states (false positive, risk accepted,
-  resolved) are sticky and survive re-scans.
+  resolved) are persisted and survive rescans.

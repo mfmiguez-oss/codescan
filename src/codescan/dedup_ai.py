@@ -1,4 +1,4 @@
-"""Semantic deduplication (cheap tier — Haiku).
+"""Semantic deduplication (lower-cost tier — Haiku).
 
 Deterministic dedup (`dedup.py`) merges findings with identical fingerprints.
 It misses cross-scanner duplicates that describe the *same* weakness with
@@ -6,7 +6,7 @@ It misses cross-scanner duplicates that describe the *same* weakness with
 issue by CWE + summary with no CVE, so their fingerprints diverge.
 
 This pass catches those. It's mechanical judgement ("are these the same
-vulnerability?"), not deep reasoning, so it runs on the cheap tier via the
+vulnerability?"), not deep reasoning, so it runs on a lower-cost tier via the
 model router. It is deliberately conservative: it only compares findings in the
 same repo + same component, and only merges what the model marks as clearly the
 same underlying vulnerability.
@@ -19,7 +19,7 @@ from functools import reduce
 
 from .dedup import _merge
 from .llm import LLMClient
-from .models import Finding
+from .models import Finding, finding_component_label
 
 _SCHEMA = {
     "type": "object",
@@ -63,7 +63,7 @@ def _digest(f: Finding) -> dict:
         "title": f.title,
         "cves": f.cve_ids,
         "cwes": f.cwe_ids,
-        "component": f"{f.component.name}@{f.component.version}",
+        "component": finding_component_label(f),
         "sources": [s.value for s in f.merged_sources],
         "description": f.description[:300],
     }

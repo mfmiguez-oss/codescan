@@ -1,9 +1,9 @@
 """Deterministic exploitability signals: CISA KEV, FIRST EPSS, reachability.
 
-These run before the AI engine and feed it. They are cheap, authoritative, and
-give the model grounded facts (is this CVE actively exploited in the wild? how
-likely is exploitation? is the vulnerable code reachable?) instead of asking it
-to recall them.
+These run before the AI engine and feed it. They are authoritative and
+provide the model with grounded facts (is this CVE actively exploited in the
+wild? how likely is exploitation? is the vulnerable code reachable?) instead of
+asking it to infer them.
 """
 
 from __future__ import annotations
@@ -12,6 +12,15 @@ import requests
 
 from ..config import EnrichmentConfig
 from ..models import Finding
+
+
+def _is_reachable_signal(text: str) -> bool | None:
+    normalized = text.lower()
+    if any(p in normalized for p in ("not reachable", "no reachable path", "unreachable")):
+        return False
+    if "reachable" in normalized:
+        return True
+    return None
 
 
 class Enricher:
@@ -74,11 +83,5 @@ class Enricher:
         (None) so the AI engine and scoring treat it conservatively rather
         than assuming unreachable.
         """
-        haystack = f"{f.description} {' '.join(f.references)}".lower()
-        # Check the negative phrasings first — "not reachable" also contains the
-        # substring "reachable", so the positive test must not run before it.
-        if any(p in haystack for p in ("not reachable", "no reachable path", "unreachable")):
-            return False
-        if "reachable" in haystack:
-            return True
-        return None
+        haystack = f"{f.description} {' '.join(f.references)}"
+        return _is_reachable_signal(haystack)

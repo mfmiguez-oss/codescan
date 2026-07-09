@@ -10,7 +10,7 @@ conservative — it only auto-classifies unambiguous cases and leaves the rest.
 
 Decisions are persisted in a state store keyed by finding fingerprint. Each
 entry is tagged `manual` when a human set it: manual decisions (and terminal
-closures) always win on re-scan, so triage is never silently overwritten.
+closures) always prevail on rescan, so triage is not silently overwritten.
 """
 
 from __future__ import annotations
@@ -20,8 +20,8 @@ from pathlib import Path
 
 from .models import Finding, ValidationState
 
-# Terminal closures that a re-scan must never overturn, even if machine-recorded.
-_STICKY = {
+# Terminal closure states that a rescan must not overturn, even if machine-recorded.
+_TERMINAL_CLOSURE_STATES = {
     ValidationState.false_positive,
     ValidationState.risk_accepted,
     ValidationState.resolved,
@@ -42,10 +42,10 @@ class StateStore:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
             for fid, val in raw.items():
                 if isinstance(val, str):
-                    self._entries[fid] = {"state": ValidationState(val), "manual": True}
+                    self._entries[fid] = {"state": _coerce_state(val), "manual": True}
                 else:
                     self._entries[fid] = {
-                        "state": ValidationState(val["state"]),
+                        "state": _coerce_state(val["state"]),
                         "manual": bool(val.get("manual", False)),
                     }
 
@@ -74,11 +74,15 @@ class StateStore:
 def assign_states(findings: list[Finding], store: StateStore) -> None:
     for f in findings:
         e = store.entry(f.id)
-        if e and (e["manual"] or e["state"] in _STICKY):
+        if e and (e["manual"] or e["state"] in _TERMINAL_CLOSURE_STATES):
             f.validation_state = e["state"]     # respect the analyst's decision
             continue
         f.validation_state = _propose(f)
         store.record(f, manual=False)
+
+
+def _coerce_state(value: object) -> ValidationState:
+    return ValidationState(value) if not isinstance(value, ValidationState) else value
 
 
 def _propose(f: Finding) -> ValidationState:

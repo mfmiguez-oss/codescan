@@ -6,10 +6,9 @@ schema in the prompt, parsing defensively.
 
 from __future__ import annotations
 
-import json
 import os
 
-from .base import CompletionRequest, LLMProvider, extract_json
+from .base import CompletionRequest, LLMProvider, build_json_instruction, extract_json
 
 
 class GoogleProvider(LLMProvider):
@@ -35,11 +34,7 @@ class GoogleProvider(LLMProvider):
     def complete_json(self, req: CompletionRequest) -> dict:
         from google.genai import types
 
-        prompt = (
-            req.user
-            + "\n\nRespond ONLY with a single JSON object matching this schema:\n"
-            + json.dumps(req.schema)
-        )
+        prompt = req.user + "\n\n" + build_json_instruction(req)
         resp = self.client.models.generate_content(
             model=req.model,
             contents=prompt,

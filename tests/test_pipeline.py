@@ -85,7 +85,7 @@ def test_servicenow_records(tmp_path):
     assert all(r["state"] for r in items)
 
 
-def test_sticky_state_survives_rerun(tmp_path):
+def test_persistent_state_survives_rerun(tmp_path):
     result = _run(tmp_path)
     state_file = tmp_path / "state.json"
     # Analyst closes one item as a false positive.

@@ -116,7 +116,7 @@ class Pipeline:
 
         findings = deduplicate(raw)                     # deterministic (free)
         if llm:
-            findings = SemanticDeduper(llm).refine(findings)  # cheap tier (Haiku)
+            findings = SemanticDeduper(llm).refine(findings)  # lower-cost tier (Haiku)
 
         enrichers = build_enrichers(self.cfg.enrichment, llm=llm, offline=self.offline)
         run_enrichment(findings, enrichers)

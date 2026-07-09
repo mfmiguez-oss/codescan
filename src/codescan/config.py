@@ -40,8 +40,9 @@ class AIConfig(BaseModel):
     model: str = "claude-opus-4-8"
     effort: str = "high"
     max_tokens: int = 32000
-    # Route individual tasks to cheaper/deeper models, e.g. dedup -> Haiku,
-    # exploitability -> Opus/Fable. Built-in defaults live in llm.py.
+    # Route individual tasks to lower-cost or higher-capability models,
+    # e.g. dedup -> Haiku, exploitability -> Opus/Fable. Built-in defaults live
+    # in llm.py.
     tasks: dict[str, TaskModel] = {}
 
 

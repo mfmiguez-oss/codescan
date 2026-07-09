@@ -84,7 +84,7 @@ def test_change_validation_state_persists(tmp_path):
     assert r.status_code == 200
     assert r.json()["validation_state"] == "risk_accepted"
 
-    # A re-scan must keep the analyst's decision (sticky).
+    # A rescan must preserve the analyst's decision.
     client.post("/api/scan", json={"use_ai": False, "offline": True})
     findings = client.get("/api/state").json()["findings"]
     reran = next(f for f in findings if f["id"] == fid)
@@ -94,8 +94,8 @@ def test_change_validation_state_persists(tmp_path):
 def test_invalid_state_rejected(tmp_path):
     client = _client(tmp_path)
     fid = client.get("/api/state").json()["findings"][0]["id"]
-    assert client.post(f"/api/findings/{fid}/state", json={"state": "bogus"}).status_code == 400
-    assert client.post("/api/findings/nope/state", json={"state": "confirmed"}).status_code == 404
+    assert client.post(f"/api/findings/{fid}/state", json={"state": "invalid_state"}).status_code == 400
+    assert client.post("/api/findings/invalid-id/state", json={"state": "confirmed"}).status_code == 404
 
 
 def test_servicenow_endpoint(tmp_path):

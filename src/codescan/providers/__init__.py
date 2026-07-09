@@ -8,7 +8,7 @@ by writing an `LLMProvider` subclass and registering it in `_CLASSES`.
 from __future__ import annotations
 
 from .anthropic_provider import AnthropicProvider
-from .base import CompletionRequest, LLMProvider, extract_json
+from .base import CompletionRequest, LLMProvider, build_json_instruction, extract_json
 from .google_provider import GoogleProvider
 from .openai_provider import OpenAIProvider
 
@@ -31,4 +31,4 @@ def get_provider(name: str) -> LLMProvider:
     return _INSTANCES[key]
 
 
-__all__ = ["CompletionRequest", "LLMProvider", "extract_json", "get_provider", "PROVIDERS"]
+__all__ = ["CompletionRequest", "LLMProvider", "build_json_instruction", "extract_json", "get_provider", "PROVIDERS"]

@@ -103,9 +103,9 @@ const children = [
     "Exploitability grounded in authoritative signals (KEV, EPSS, reachability), not raw CVSS.",
     "Explicit attack chains — sequences of findings that combine into a worse outcome — scored accordingly.",
     "A composite risk score that reorders the queue by actual risk.",
-    "A validation lifecycle that survives re-scans (analyst decisions are sticky).",
+    "A validation lifecycle that survives rescans (analyst decisions are persisted).",
     "Output shaped for ServiceNow VR with idempotent upserts.",
-    "Cost-appropriate model use: cheap models for mechanical work, deep models for reasoning.",
+    "Cost-appropriate model use: lower-cost models for mechanical work, deep models for reasoning.",
   ]),
   H2("Non-goals"),
   ...bullets([
@@ -122,8 +122,8 @@ const children = [
       ["Code in local Bitbucket", "connectors/bitbucket.py — builds the repo inventory. GitHub/GHES (connectors/github.py) is a selectable alternative via source.provider."],
       ["Snyk + Xray available", "connectors/snyk.py, connectors/xray.py — live pull or offline export, normalized to one Finding."],
       ["Output for ServiceNow Vulnerabilities", "servicenow.py — sn_vul_vulnerable_item records, idempotent via correlation_id."],
-      ["Validation states", "validation.py + models.py — lifecycle + sticky state store + VR state mapping."],
-      ["Deduplication", "dedup.py (deterministic) + dedup_ai.py (semantic, cheap tier)."],
+      ["Validation states", "validation.py + models.py — lifecycle + persistent state store + VR state mapping."],
+      ["Deduplication", "dedup.py (deterministic) + dedup_ai.py (semantic, lower-cost tier)."],
       ["Exploitability incl. chaining, scored", "exploitability.py (LLM) + enrich/ (KEV/EPSS/reachability) + scoring.py."],
       ["AI tooling", "llm.py — task-to-model router over the Anthropic SDK."],
     ],
@@ -170,7 +170,7 @@ const children = [
   H2("5.2 Deduplication (two passes)"),
   ...bullets([
     "Deterministic (dedup.py) — group by fingerprint, merge collisions. The merge keeps the higher-severity record as primary, unions CVEs/CWEs/references/fixes, prefers a present CVSS and the longer description, and records provenance from every contributing scanner. A finding seen by both scanners earns a corroboration bonus in scoring.",
-    "Semantic (dedup_ai.py, optional, cheap tier) — catches cross-scanner duplicates the fingerprint misses (same weakness, divergent identifiers). Deliberately narrow: only compares findings in the same repo + same component, and only merges what the model marks as clearly the same vulnerability.",
+    "Semantic (dedup_ai.py, optional, lower-cost tier) — catches cross-scanner duplicates the fingerprint misses (same weakness, divergent identifiers). Deliberately narrow: only compares findings in the same repo + same component, and only merges what the model marks as clearly the same vulnerability.",
   ]),
   H2("5.3 Enrichment (pluggable framework)"),
   P("Enrichment is a framework, not a fixed step. Each source is a BaseEnricher (enrich/) with an enrich(findings) method; build_enrichers assembles the enabled ones from config and runs them in order. Adding a source (VEX, asset criticality, exploit-DB) is a new subclass with no pipeline change."),
@@ -178,7 +178,7 @@ const children = [
     "CISA KEV — is the CVE actively exploited in the wild?",
     "FIRST EPSS — probability of exploitation (batched lookups).",
     "Reachability — heuristic over scanner metadata; True/False/unknown (negative phrasing checked first).",
-    "AI enrichment (optional, cheap tier) — remediation guidance + categorization tags, plus a reachability judgement when the scanner gave none. Complements the exploitability engine; routed to the enrichment task (Haiku by default).",
+    "AI enrichment (optional, lower-cost tier) — remediation guidance + categorization tags, plus a reachability judgement when the scanner gave none. Complements the exploitability engine; routed to the enrichment task (Haiku by default).",
   ]),
   P("Deterministic enrichers run first — cheap, authoritative, and grounding for the LLM stages. Each is toggleable in config and from the config UI. Network failures degrade gracefully rather than failing the run."),
   H2("5.4 Exploitability & chaining engine"),
@@ -193,7 +193,7 @@ const children = [
   table(
     ["Task", "Default tier", "Rationale"],
     [
-      ["dedup", "Haiku 4.5", "Mechanical \"same vuln?\" judgement."],
+      ["dedup", "Haiku 4.5", "Mechanical \"same vulnerability?\" judgement."],
       ["exploitability", "Opus 4.8 (Fable 5 for hardest chaining)", "Deep, judgement-heavy reasoning."],
       ["(other)", "default tier (ai.model)", "Fallback."],
     ],
@@ -212,11 +212,11 @@ const children = [
     [2400, 1400, 5560]),
   P("Adjustments on top of the blend: a KEV floor (anything actively exploited is floored to 85) and a corroboration bonus (+2 when both scanners agree). Threat models influence the score in exactly one place — the exploitability dimension: a cited finding's threat signal is one of the averaged exploitability inputs, so a threatened finding scores higher, counted once. Runs without threat modeling are unaffected. This is what makes the queue useful: an unreachable critical drops below a reachable, chainable, threatened high."),
   H2("5.7 Validation states (validation.py)"),
-  P("Internal lifecycle mapped to ServiceNow VR states on export: new -> under_investigation -> confirmed / false_positive / risk_accepted / duplicate / resolved. The pipeline proposes a conservative initial state; a human confirms or overrides. Stickiness is the important property: the StateStore persists each decision keyed by fingerprint and tags whether a human set it. On re-scan, any manual decision or terminal closure is honored and never re-opened — analyst effort is never silently discarded."),
+  P("Internal lifecycle mapped to ServiceNow VR states on export: new -> under_investigation -> confirmed / false_positive / risk_accepted / duplicate / resolved. The pipeline proposes a conservative initial state; a human confirms or overrides. Persistence is the important property: the StateStore persists each decision keyed by fingerprint and tags whether a human set it. On rescan, any manual decision or terminal closure is honored and never re-opened — analyst effort is never silently discarded."),
   H2("5.8 ServiceNow export (servicenow.py)"),
   P("Builds sn_vul_vulnerable_item records, highest-risk first, carrying the composite score, risk rating, validation state, and the exploitability rationale plus attack-chain context in the work notes — so a responder sees why the tool ranked it. correlation_id is the fingerprint, making the import idempotent: re-runs upsert the same item and closed items stay closed. Output is written to a file — JSON (servicenow_import.json) or, when servicenow.format is csv, a CSV (servicenow_import.csv) for CSV Import Sets, with multi-line work notes quoted correctly — or POSTed to the import table via the Table API. The format is settable in config, the config UI, or with --sn-format on the CLI."),
   H2("5.9 Web UI (web.py + static/index.html)"),
-  P("A FastAPI backend holds the latest result in memory; the frontend is a single dependency-free HTML page with four views, plus GET /api/export for JSON/CSV downloads. Overview: the landing page — run status (source, mode, last run), key metrics, a severity breakdown, quick actions (run, download JSON/CSV, jump to a tab), and an in-app usage guide, making the UI a complete usage surface with no CLI required. Findings: the triage queue with filters, signal badges, a per-finding detail drawer (CVSS vector, EPSS, reachability, provenance, rationale, remediation, tags, threats, chains), and inline validation-state editing that persists to the sticky store."),
+  P("A FastAPI backend holds the latest result in memory; the frontend is a single dependency-free HTML page with four views, plus GET /api/export for JSON/CSV downloads. Overview: the landing page — run status (source, mode, last run), key metrics, a severity breakdown, quick actions (run, download JSON/CSV, jump to a tab), and an in-app usage guide, making the UI a complete usage surface with no CLI required. Findings: the triage queue with filters, signal badges, a per-finding detail drawer (CVSS vector, EPSS, reachability, provenance, rationale, remediation, tags, threats, chains), and inline validation-state editing that persists to the persistent store."),
   P("Threats: the per-service threat models (5.10) — STRIDE threats with linked findings/chains, assets, entry points, trust boundaries, posture, and recommendations."),
   P("Config: edit non-secret settings live — the repo source (Bitbucket/GitHub) and GitHub repo/org targets, default AI tier, per-task model routing, enrichment toggles, threat-modeling toggle, scoring weights, and the ServiceNow push flag/format. Secrets are shown masked and read-only (they stay in the environment). Edits apply to the next scan and persist to config.overrides.json, layered over the base config on restart; POST is validated server-side and rejected with 400 on bad input."),
   P("Scans run from the header (AI / offline / live toggles + Run scan) via POST /api/scan, in-process, recording a last-run timestamp. On-demand live scans of Bitbucket/Snyk/Xray are supported, not just the boot mode. A failed run — e.g. live mode without credentials — is caught and shown in an error banner with the last good result preserved, rather than returning a 500; /healthz backs the container probe."),
@@ -247,7 +247,7 @@ const children = [
       ["Per-service chaining scope", "Whole-estate chaining", "Meaningful (connected components) and tractable (bounded requests)."],
       ["Task-based model routing", "One model everywhere", "Haiku for mechanical work, Opus/Fable for reasoning."],
       ["Composite score with KEV floor", "Rank by CVSS", "CVSS mis-ranks; the blend + floor surface exploited/chainable issues."],
-      ["Sticky, human-tagged states", "Recompute every run", "Analyst decisions survive re-scans; proposals stay re-derivable."],
+      ["Persistent, human-tagged states", "Recompute every run", "Analyst decisions survive rescans; proposals stay re-derivable."],
       ["Idempotent export via correlation_id", "Insert-only", "Prevents duplicate VR items and re-opening closed ones."],
       ["Default Opus 4.8, opt into Fable 5", "Default Fable", "Opus is the right default; Fable reserved for hardest chaining, auto-enables fallbacks."],
     ],
@@ -279,7 +279,7 @@ const children = [
   H1("10. Scalability"),
   ...bullets([
     "Ingestion paginates all three sources; dedup/enrichment/scoring are O(n log n) in memory; EPSS lookups are batched (100 CVEs/request).",
-    "LLM calls are the cost/latency driver but are bounded by service, not finding count — a repo with 500 findings is one exploitability call, not 500. Cheap-tier routing keeps mechanical calls inexpensive.",
+    "LLM calls are the cost/latency driver but are bounded by service, not finding count — a repo with 500 findings is one exploitability call, not 500. Lower-cost routing keeps mechanical calls inexpensive.",
     "Horizontal path: the per-service AI calls are embarrassingly parallel; batching or the Batches API is the natural next step for very large estates.",
   ]),
 
@@ -297,9 +297,9 @@ const children = [
 
   H1("12. Testing"),
   ...bullets([
-    "Deterministic pipeline (tests/test_pipeline.py) — offline over fixtures: cross-scanner dedup, corroboration, reachability-driven scoring, validation states, ServiceNow shape, sticky closures.",
+    "Deterministic pipeline (tests/test_pipeline.py) — offline over fixtures: cross-scanner dedup, corroboration, reachability-driven scoring, validation states, ServiceNow shape, persistent closures.",
     "Model router (tests/test_llm_router.py) — pure resolution logic (Haiku default, fallback, override precedence, partial-override inheritance).",
-    "Web API (tests/test_web.py) — FastAPI TestClient over state, scan, state-change (sticky across rescan), validation, and ServiceNow endpoints.",
+    "Web API (tests/test_web.py) — FastAPI TestClient over state, scan, state-change (persisted across rescan), validation, and ServiceNow endpoints.",
     "All tests run offline with no Anthropic key; AI stages are validated by contract (schema) rather than live calls.",
   ]),
 

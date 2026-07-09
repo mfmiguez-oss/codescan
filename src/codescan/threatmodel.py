@@ -14,10 +14,9 @@ Optional and per-service (like exploitability), routed to the "threat_model" tas
 from __future__ import annotations
 
 import json
-from collections import defaultdict
 
 from .llm import LLMClient
-from .models import Asset, EntryPoint, Finding, Severity, Stride, Threat, ThreatModel
+from .models import Asset, EntryPoint, Finding, Severity, Stride, Threat, ThreatModel, finding_component_label, group_findings_by_repo
 
 _STRIDE = [s.value for s in Stride]
 
@@ -100,7 +99,7 @@ def _finding_digest(f: Finding) -> dict:
         "cves": f.cve_ids,
         "cwes": f.cwe_ids,
         "severity": f.severity.value,
-        "component": f"{f.component.name}@{f.component.version}",
+        "component": finding_component_label(f),
         "exploitability": ex.score,
         "in_kev": ex.in_kev,
         "reachable": ex.reachable,
@@ -116,9 +115,7 @@ class ThreatModelEngine:
         self.llm = llm
 
     def build(self, findings: list[Finding], chains: list[dict]) -> list[ThreatModel]:
-        by_repo: dict[str, list[Finding]] = defaultdict(list)
-        for f in findings:
-            by_repo[f.location.repo].append(f)
+        by_repo = group_findings_by_repo(findings)
 
         models: list[ThreatModel] = []
         for repo, group in by_repo.items():

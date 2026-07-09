@@ -3,7 +3,7 @@
 Wraps the pipeline in a small HTTP API and serves the single-page analyst
 dashboard. It holds the latest scan result in memory; the UI reads it, drills
 into exploitability and attack chains, and changes validation states (which
-persist to the state store so triage sticks across re-scans).
+persist to the state store so triage persists across rescans).
 
 Defaults are offline + no-AI so `codescan serve` works against the sample
 fixtures with no credentials. A scan can be re-triggered with different options
@@ -210,7 +210,7 @@ class AppState:
         self.startup_error: str | None = None
         # Don't crash the server if the initial scan fails (e.g. live mode with
         # missing credentials). Boot empty; the operator can fix config and
-        # re-scan from the UI.
+        # rescan from the UI.
         try:
             self.scan()
         except Exception as exc:  # noqa: BLE001 - surface, don't fail startup

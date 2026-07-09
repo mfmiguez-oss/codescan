@@ -30,9 +30,9 @@ ServiceNow-ready records — with an analyst UI on top.
 - Exploitability judgement grounded in authoritative signals (KEV, EPSS, reachability), not raw CVSS.
 - Explicit **attack chains** — sequences of findings that combine into a materially worse outcome — scored accordingly.
 - A composite risk score that reorders the queue by *actual* risk.
-- A validation-state lifecycle that survives re-scans (analyst decisions are sticky).
+- A validation-state lifecycle that survives rescans (analyst decisions are persisted).
 - Output shaped for ServiceNow VR with idempotent upserts.
-- Cost-appropriate model use: cheap models for mechanical work, deep models for reasoning.
+- Cost-appropriate model use: lower-cost models for mechanical work, deeper models for reasoning.
 
 ### Non-goals
 
@@ -50,8 +50,8 @@ ServiceNow-ready records — with an analyst UI on top.
 | Code in local Bitbucket | `connectors/bitbucket.py` — on-prem REST API builds the repo inventory (scan surface). GitHub/GHES (`connectors/github.py`) is a selectable alternative via `source.provider`. |
 | Snyk + Xray available | `connectors/snyk.py`, `connectors/xray.py` — live pull or offline export, normalized to one `Finding`. |
 | Output for ServiceNow Vulnerabilities | `servicenow.py` — `sn_vul_vulnerable_item` records, idempotent via `correlation_id`. |
-| Validation states | `validation.py` + `models.py` — lifecycle + sticky state store + VR state mapping. |
-| Deduplication | `dedup.py` (deterministic) + `dedup_ai.py` (semantic, cheap tier). |
+| Validation states | `validation.py` + `models.py` — lifecycle + persistent state store + VR state mapping. |
+| Deduplication | `dedup.py` (deterministic) + `dedup_ai.py` (semantic, lower-cost tier). |
 | Exploitability incl. chaining, scored | `exploitability.py` (LLM) + `enrich/` (KEV/EPSS/reachability) + `scoring.py`. |
 | AI tooling | `llm.py` — task→model router over the Anthropic SDK. |
 
@@ -198,7 +198,7 @@ slug and is the documented integration point to harden for production (§11).
    `first_seen`. A finding seen by both scanners earns a small **corroboration**
    bonus later in scoring.
 
-2. **Semantic** (`dedup_ai.py`, optional, cheap tier) — catches cross-scanner
+2. **Semantic** (`dedup_ai.py`, optional, lower-cost tier) — catches cross-scanner
    duplicates the fingerprint misses: same weakness, divergent identifiers (one
    has a CVE, the other only a CWE + summary). It is deliberately narrow — it
    only compares findings in the *same repo + same component* and only merges
@@ -218,13 +218,14 @@ enrichers:
 - **Reachability** (`reachability.py`) — heuristic over scanner metadata; returns
   `True`/`False`/`unknown` (negative phrasing checked first so "not reachable"
   isn't misread as "reachable").
-- **AI enrichment** (`ai.py`, optional, cheap tier) — remediation guidance +
+- **AI enrichment** (`ai.py`, optional, lower-cost tier) — remediation guidance +
   categorization tags, and a reachability judgement when the scanner gave none.
   It complements the exploitability engine (which scores and chains) rather than
   duplicating it, and is routed to the `enrichment` task (Haiku by default).
 
-Deterministic enrichers run first — cheap, authoritative, and grounding for the
-LLM stages. Each is toggleable in config and **from the config UI** (§5.9).
+Deterministic enrichers run first — cost-effective, authoritative, and
+grounding for the LLM stages. Each is toggleable in config and **from the
+config UI** (§5.9).
 Network failures degrade gracefully rather than failing the run.
 
 ### 5.4 Exploitability & chaining engine
@@ -267,7 +268,7 @@ Different tasks need different intelligence tiers:
 
 | Task | Default tier | Rationale |
 |---|---|---|
-| `dedup` | **Haiku 4.5** (effort n/a, 8k tokens) | Mechanical "same vuln?" judgement. |
+| `dedup` | **Haiku 4.5** (effort n/a, 8k tokens) | Mechanical "same vulnerability?" judgement. |
 | `exploitability` | **Opus 4.8** (high effort, 32k) → Fable 5 for hardest chaining | Deep, judgement-heavy reasoning. |
 | *(anything else)* | default tier (`ai.model`) | Fallback. |
 
@@ -321,9 +322,9 @@ The pipeline **proposes** a conservative initial state (KEV or chained →
 confirmed; unreachable + low exploitability → under_investigation as a candidate
 FP; high score/severity → confirmed; else new). A human confirms or overrides.
 
-**Stickiness** is the important property. The `StateStore` persists each
+**Persistence** is the important property. The `StateStore` persists each
 decision keyed by fingerprint and tags whether a human set it (`manual`). On
-re-scan, `assign_states` honors any manual decision or terminal closure and
+rescan, `assign_states` honors any manual decision or terminal closure and
 never re-opens it — analyst effort is never silently discarded. Machine
 proposals remain re-derivable.
 
@@ -354,7 +355,7 @@ dependency-free HTML page for the frontend. Endpoints: `GET /api/state`,
 - **Findings** — the triage queue with filters, signal badges, a per-finding
   detail drawer (CVSS vector, EPSS, reachability, provenance, rationale,
   remediation, tags, threats, chains), and inline validation-state editing that
-  persists to the sticky store.
+  persists to the persistent store.
 - **Threats** — the per-service threat models (§5.10): STRIDE threats with
   linked findings/chains, assets, entry points, trust boundaries, posture, and
   recommendations.
@@ -449,7 +450,7 @@ sequenceDiagram
 | Per-service chaining scope | Whole-estate chaining | Meaningful (connected components) and tractable (bounded request size). |
 | Task-based model routing | One model everywhere | Haiku for mechanical work, Opus/Fable for reasoning — right cost per task. |
 | Composite score with KEV floor | Rank by CVSS | CVSS mis-ranks; the blend + floor put actively-exploited and chainable issues on top. |
-| Sticky, human-tagged validation states | Recompute every run | Analyst decisions must survive re-scans; machine proposals stay re-derivable. |
+| Persistent, human-tagged validation states | Recompute every run | Analyst decisions must survive rescans; machine proposals stay re-derivable. |
 | Idempotent export via `correlation_id` | Insert-only | Prevents duplicate VR items and re-opening closed ones across daily runs. |
 | Default to Opus 4.8, opt into Fable 5 | Default Fable | Opus is the right default; Fable is reserved for hardest chaining and auto-enables refusal fallbacks. |
 
@@ -504,7 +505,7 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
 - **LLM calls** are the cost/latency driver. They are bounded by *service*
   (one exploitability call per repo, dedup calls per repo+component cluster),
   not by total finding count — a repo with 500 findings is one exploitability
-  call, not 500. Cheap-tier routing keeps the mechanical calls inexpensive.
+  call, not 500. Lower-cost routing keeps the mechanical calls inexpensive.
 - **Horizontal scale** path: the per-service AI calls are embarrassingly
   parallel; batching or the Batches API is the natural next step for very large
   estates (§11).
@@ -541,12 +542,12 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
 
 - **Deterministic pipeline** (`tests/test_pipeline.py`) — runs offline over
   fixtures, asserting cross-scanner dedup, corroboration, reachability-driven
-  scoring, validation states, ServiceNow record shape, and sticky closures.
+  scoring, validation states, ServiceNow record shape, and persisted closures.
 - **Model router** (`tests/test_llm_router.py`) — pure resolution logic
   (Haiku default for dedup, default-tier fallback, override precedence,
   partial-override inheritance); no network/key.
 - **Web API** (`tests/test_web.py`) — FastAPI TestClient over the state,
-  scan, state-change (incl. sticky-across-rescan), validation, and ServiceNow
+  scan, state-change (incl. persistent-across-rescan), validation, and ServiceNow
   endpoints.
 
 All tests run offline with no Anthropic key. The AI stages are integration
