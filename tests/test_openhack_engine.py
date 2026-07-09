@@ -19,8 +19,8 @@ class FakeLLM:
         self.findings = findings
         self.calls = []
 
-    def complete_json(self, task, system, user, schema):
-        self.calls.append({"task": task, "user": user})
+    def complete_json(self, task, system, user, schema, **kwargs):
+        self.calls.append({"task": task, "user": user, **kwargs})
         return {"findings": self.findings}
 
 

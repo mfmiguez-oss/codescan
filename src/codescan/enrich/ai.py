@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import json
 
+from ..concurrency import map_workers, workers_of
 from ..llm import LLMClient
-from ..models import Finding, finding_component_label, group_findings_by_repo
+from ..models import Finding, finding_component_label, group_difficulty, group_findings_by_repo
 from .base import BaseEnricher
 
 _SCHEMA = {
@@ -70,12 +71,20 @@ class AIEnricher(BaseEnricher):
     def enrich(self, findings: list[Finding]) -> None:
         by_repo = group_findings_by_repo(findings)
         by_id = {f.id: f for f in findings}
-        for repo, group in by_repo.items():
-            self._apply(self._ask(repo, group), by_id)
+        # Query per-repo groups concurrently, then apply in order.
+        results = map_workers(
+            lambda item: self._ask(item[0], item[1]),
+            list(by_repo.items()),
+            workers_of(self.llm),
+        )
+        for result in results:
+            self._apply(result, by_id)
 
     def _ask(self, repo: str, group: list[Finding]) -> dict:
         user = f"Service: {repo}\n\n" + json.dumps([_digest(f) for f in group], indent=2)
-        return self.llm.complete_json("enrichment", _SYSTEM, user, _SCHEMA)
+        return self.llm.complete_json(
+            "enrichment", _SYSTEM, user, _SCHEMA, difficulty=group_difficulty(group)
+        )
 
     def _apply(self, result: dict, by_id: dict[str, Finding]) -> None:
         for it in result.get("items", []):

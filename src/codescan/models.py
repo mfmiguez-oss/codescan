@@ -22,6 +22,36 @@ def group_findings_by_repo(findings: list["Finding"]) -> dict[str, list["Finding
     return by_repo
 
 
+def group_difficulty(findings: list["Finding"]) -> str:
+    """Reasoning-difficulty bucket for a per-service AI call: low | normal | high.
+
+    Drives `auto_route` (see llm.py). A single low/medium finding is trivial ("low",
+    downgrade); actively-exploited (KEV), several high/critical findings, or a large
+    group (more chaining surface) warrant a stronger model ("high", upgrade).
+    Everything else is "normal" (no change). Signals present at every stage: KEV is
+    only set post-enrichment, so pre-enrichment callers simply won't see it.
+    """
+    n = len(findings)
+    if n == 0:
+        return "low"
+    kev = any(f.exploitability.in_kev for f in findings)
+    high = sum(1 for f in findings if f.severity.rank >= Severity.high.rank)
+    if kev or high >= 3 or n >= 8:
+        return "high"
+    if n == 1 and high == 0:
+        return "low"
+    return "normal"
+
+
+def size_difficulty(count: int, *, low_max: int = 2, high_min: int = 6) -> str:
+    """Difficulty bucket from a plain item count (e.g. dedup cluster / file batch)."""
+    if count <= low_max:
+        return "low"
+    if count >= high_min:
+        return "high"
+    return "normal"
+
+
 def finding_component_label(finding: "Finding") -> str:
     """Return a stable component label like name@version."""
     return f"{finding.component.name}@{finding.component.version or ''}"

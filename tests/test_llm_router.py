@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from codescan.config import AIConfig, TaskModel
-from codescan.llm import ModelRouter
+from codescan.llm import ModelRouter, auto_route, ModelSpec
 
 
 def test_dedup_defaults_to_haiku():
@@ -49,3 +49,40 @@ def test_partial_override_inherits_default():
     assert spec.model == "claude-haiku-4-5"      # built-in
     assert spec.effort == "medium"               # overridden
     assert spec.provider == "anthropic"          # inherited
+
+
+# --- auto-route (silent adaptive model selection) --------------------------
+
+def _opus():
+    return ModelSpec("anthropic", "claude-opus-4-8", "high", 32000)
+
+
+def test_auto_route_off_by_default_no_shift():
+    router = ModelRouter(AIConfig(model="claude-opus-4-8"))   # auto_route defaults False
+    assert router.resolve("exploitability", difficulty="high").model == "claude-opus-4-8"
+    assert router.resolve("exploitability", difficulty="low").model == "claude-opus-4-8"
+
+
+def test_auto_route_downgrades_and_upgrades():
+    router = ModelRouter(AIConfig(model="claude-opus-4-8", auto_route=True))
+    assert router.resolve("x", difficulty="low").model == "claude-sonnet-5"    # down 1
+    assert router.resolve("x", difficulty="normal").model == "claude-opus-4-8"  # unchanged
+    assert router.resolve("x", difficulty="high").model == "claude-fable-5"    # up 1
+
+
+def test_auto_route_clamps_at_ladder_ends():
+    # Haiku can't go lower; Fable can't go higher.
+    assert auto_route(ModelSpec("anthropic", "claude-haiku-4-5", "low", 8000), "low").model == "claude-haiku-4-5"
+    assert auto_route(ModelSpec("anthropic", "claude-fable-5", "high", 32000), "high").model == "claude-fable-5"
+
+
+def test_auto_route_leaves_custom_and_other_suppliers_alone():
+    # A model not on the ladder is never shifted.
+    assert auto_route(ModelSpec("anthropic", "claude-opus-4-6", "high", 32000), "low").model == "claude-opus-4-6"
+    # Non-Anthropic provider is never shifted.
+    assert auto_route(ModelSpec("openai", "gpt-5", "high", 32000), "high").model == "gpt-5"
+
+
+def test_auto_route_preserves_effort_and_tokens():
+    out = auto_route(_opus(), "high")
+    assert (out.model, out.effort, out.max_tokens) == ("claude-fable-5", "high", 32000)

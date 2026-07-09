@@ -16,8 +16,9 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 
+from .concurrency import map_workers, workers_of
 from .llm import LLMClient
-from .models import Asset, EntryPoint, Finding, Severity, Stride, Threat, ThreatModel, finding_component_label, group_findings_by_repo
+from .models import Asset, EntryPoint, Finding, Severity, Stride, Threat, ThreatModel, finding_component_label, group_difficulty, group_findings_by_repo
 
 _STRIDE = [s.value for s in Stride]
 
@@ -118,15 +119,18 @@ class ThreatModelEngine:
     def build(self, findings: list[Finding], chains: list[dict]) -> list[ThreatModel]:
         by_repo = group_findings_by_repo(findings)
 
-        models: list[ThreatModel] = []
-        for repo, group in by_repo.items():
+        def build_repo(item: tuple[str, list[Finding]]) -> ThreatModel:
+            repo, group = item
             repo_fids = {f.id for f in group}
             repo_chains = [
                 c for c in chains
                 if any(fid in repo_fids for fid in c.get("finding_ids", []))
             ]
-            models.append(self._build_one(repo, group, repo_chains))
-        return models
+            return self._build_one(repo, group, repo_chains)
+
+        # One deep-tier call per service; independent, so run them concurrently
+        # (order preserved for a stable threat_models.json).
+        return map_workers(build_repo, list(by_repo.items()), workers_of(self.llm))
 
     def _build_one(self, repo: str, group: list[Finding], chains: list[dict]) -> ThreatModel:
         payload = {
@@ -136,7 +140,9 @@ class ThreatModelEngine:
         }
         user = ("Build a STRIDE threat model for this service.\n\n"
                 + json.dumps(payload, indent=2))
-        result = self.llm.complete_json(self.TASK, _SYSTEM, user, _SCHEMA)
+        result = self.llm.complete_json(
+            self.TASK, _SYSTEM, user, _SCHEMA, difficulty=group_difficulty(group)
+        )
         return self._parse(repo, result)
 
     @staticmethod

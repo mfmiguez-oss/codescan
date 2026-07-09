@@ -130,6 +130,54 @@ whose identifiers differ (same weakness, one has a CVE and the other only a CWE)
 It's conservative — same repo + same component, and only merges what the model
 is confident about.
 
+## Efficiency & cost
+
+The pipeline is I/O-bound on model API calls, and each judgement-heavy stage
+(exploitability, threat modeling, AI enrichment, semantic dedup, OpenHack) issues
+**one request per repo/service**. Two levers keep large scans fast and affordable:
+
+- **Concurrency (speed).** Those per-service requests are independent, so codescan
+  runs up to `ai.max_concurrency` of them at once (default 4; also in the Config
+  tab). Results are still applied in a deterministic order, so output is unchanged —
+  only wall-clock time drops (≈N× on an N-repo scan, bounded by the setting). Set it
+  to `1` for strictly sequential execution. It's a latency optimization: the same
+  requests are made at the same cost.
+- **Model routing (cost).** Pay Opus rates only where the reasoning needs it. Dedup
+  and enrichment already default to **Haiku**. For cost-sensitive deployments, route
+  the token-heavy stages to **Sonnet** (near-Opus quality on code at ~40% lower
+  input/output cost) — the OpenHack source review and threat modeling are the usual
+  candidates:
+
+  ```yaml
+  ai:
+    tasks:
+      openhack:     { model: claude-sonnet-5 }   # source review — token-heavy
+      threat_model: { model: claude-sonnet-5 }
+  ```
+
+  These are opt-in; the default tier stays Opus 4.8. Both `openhack` and
+  `threat_model` are routable tasks in the Config tab.
+- **Auto-route (adaptive, silent).** Turn on `ai.auto_route` and codescan sizes the
+  model to the work *per call*, with no per-task config: each AI request is nudged
+  up or down an Anthropic ladder — **Haiku → Sonnet → Opus → Fable** — from its
+  configured tier by a difficulty signal. A single low-severity finding downgrades
+  (cheaper); an actively-exploited (KEV), multi-critical, or large group upgrades
+  (stronger reasoning). It moves **relative to** your configured tier (so an
+  `exploitability` baseline of Opus becomes Sonnet when trivial, Fable when hot),
+  only shifts Anthropic models that sit on the ladder, and never touches a custom
+  model id or another supplier. Off by default — enabling it is the operator's
+  explicit choice; once on it applies silently. Toggle in the Config tab.
+
+  ```yaml
+  ai:
+    auto_route: true          # silent per-call downgrade/upgrade by difficulty
+  ```
+
+Prompt caching isn't used: the static system prompts are far below the model's
+minimum cacheable-prefix size and each request's payload differs, so a cache
+breakpoint would never hit — it's deliberately omitted rather than added as dead
+weight.
+
 ## Threat modeling
 
 Optional per-service **STRIDE threat model** (`threatmodel.py`, deep tier). Where
@@ -375,6 +423,7 @@ src/codescan/
   openhack_engine.py   built-in in-process whitebox source-review engine (deep tier)
   openhack_runner.py   auto-run OpenHack (built-in engine or external command)
   llm.py               model router (task -> tier) + shared structured client
+  concurrency.py       bounded parallel-map for the per-service AI calls
   dedup.py             deterministic cross-scanner merge
   dedup_ai.py          semantic near-duplicate merge (lower-cost tier / Haiku)
   enrich/              KEV, EPSS, reachability

@@ -17,9 +17,10 @@ from __future__ import annotations
 from collections import defaultdict
 from functools import reduce
 
+from .concurrency import map_workers, workers_of
 from .dedup import _merge
 from .llm import LLMClient
-from .models import Finding, finding_component_label
+from .models import Finding, finding_component_label, size_difficulty
 
 _SCHEMA = {
     "type": "object",
@@ -81,10 +82,14 @@ class SemanticDeduper:
         for f in findings:
             clusters[(f.location.repo, f.component.name.lower())].append(f)
 
-        for (repo, comp), cluster in clusters.items():
-            if len(cluster) < 2:
-                continue
-            for group in self._ask(repo, comp, cluster):
+        candidates = [(repo, comp, c) for (repo, comp), c in clusters.items() if len(c) >= 2]
+        # Ask about each cluster concurrently; apply the merges sequentially so the
+        # shared `survivors` map is mutated by one thread only (order preserved).
+        merge_lists = map_workers(
+            lambda item: self._ask(item[0], item[1], item[2]), candidates, workers_of(self.llm)
+        )
+        for groups in merge_lists:
+            for group in groups:
                 members = [survivors[i] for i in group if i in survivors]
                 if len(members) < 2:
                     continue
@@ -101,7 +106,9 @@ class SemanticDeduper:
             "Findings:\n"
             + "\n".join(str(_digest(f)) for f in cluster)
         )
-        result = self.llm.complete_json("dedup", _SYSTEM, user, _SCHEMA)
+        result = self.llm.complete_json(
+            "dedup", _SYSTEM, user, _SCHEMA, difficulty=size_difficulty(len(cluster))
+        )
         return [
             g["finding_ids"]
             for g in result.get("merge_groups", [])

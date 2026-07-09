@@ -11,6 +11,16 @@ ai:
   model: claude-opus-4-8
   effort: high            # low | medium | high | xhigh | max (Anthropic; ignored elsewhere)
   max_tokens: 32000
+  # Per-service AI calls (exploitability, threat modeling, enrichment, dedup,
+  # OpenHack) run independently — this many at once. Cuts wall-clock time on large
+  # multi-repo scans; latency-only (same requests/cost). 1 = sequential.
+  max_concurrency: 4
+  # Silent adaptive model selection. When true, each AI call is nudged up or down an
+  # Anthropic ladder (Haiku→Sonnet→Opus→Fable) from its configured tier by how hard
+  # the work is: trivial groups downgrade (cheaper), KEV/critical/large groups
+  # upgrade (stronger). Off = deterministic tiers. Only moves Anthropic models on
+  # the ladder; custom models and other suppliers are left as configured.
+  auto_route: false
 
   # Per-task model routing: lower-cost models for mechanical work, deep models
   # for reasoning. Unset fields inherit the default tier above. Built-in defaults

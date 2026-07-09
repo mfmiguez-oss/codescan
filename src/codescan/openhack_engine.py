@@ -28,6 +28,7 @@ from pathlib import Path
 
 from .config import OpenHackConfig
 from .llm import LLMClient
+from .models import size_difficulty
 
 # Source extensions worth a security review. Kept broad but bounded; anything not
 # listed (assets, lockfiles, binaries) is skipped so batches stay code-dense.
@@ -210,7 +211,11 @@ class OpenHackEngine:
             f"security vulnerabilities present in this code.\n\n"
             + "\n\n".join(blocks)
         )
-        return self.llm.complete_json(self.TASK, _SYSTEM, user, _SCHEMA)
+        # Larger batches (more files / more surface) get a stronger model when
+        # auto_route is on; a one- or two-file batch a cheaper one.
+        return self.llm.complete_json(
+            self.TASK, _SYSTEM, user, _SCHEMA, difficulty=size_difficulty(len(batch)),
+        )
 
     # --- persistence: OpenHack finding-candidate envelope -----------------
     def _write_candidates(self, fc_dir: Path, section: int, result: dict) -> None:

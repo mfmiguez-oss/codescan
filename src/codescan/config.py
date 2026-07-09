@@ -40,6 +40,18 @@ class AIConfig(BaseModel):
     model: str = "claude-opus-4-8"
     effort: str = "high"
     max_tokens: int = 32000
+    # Per-service AI calls (exploitability, threat modeling, enrichment, dedup) are
+    # independent — run up to this many concurrently to cut wall-clock time on large
+    # scans. Latency-only (same requests, same cost); 1 = sequential. Bounded to
+    # stay within provider rate limits.
+    max_concurrency: int = 4
+    # Silent adaptive model selection: when true, each AI call is nudged up or down
+    # an Anthropic capability ladder (Haiku→Sonnet→Opus→Fable) from its configured
+    # tier based on how hard the work is — cheaper for trivial groups, stronger for
+    # KEV/critical/large ones. Off by default (deterministic tiers); enabling it is
+    # the operator's explicit opt-in. Only shifts Anthropic models on the ladder;
+    # custom models and other suppliers are left exactly as configured.
+    auto_route: bool = False
     # Route individual tasks to lower-cost or higher-capability models,
     # e.g. dedup -> Haiku, exploitability -> Opus/Fable. Built-in defaults live
     # in llm.py.

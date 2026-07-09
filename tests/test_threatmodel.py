@@ -15,7 +15,7 @@ class FakeLLM:
         self.payload = payload
         self.calls: list[str] = []
 
-    def complete_json(self, task, system, user, schema):
+    def complete_json(self, task, system, user, schema, **kwargs):
         self.calls.append(task)
         return self.payload
 
