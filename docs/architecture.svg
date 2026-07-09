@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 660" width="2000" height="1320" role="img" font-family="Segoe UI, Roboto, system-ui, sans-serif">
   <title>codescan architecture</title>
-  <desc>Bitbucket, Snyk and Xray feed a pipeline that ingests, deduplicates (deterministic then AI/Haiku), enriches with KEV/EPSS/reachability, runs AI exploitability and attack-chain analysis (Opus/Fable), scores, and assigns validation states, then exports to ServiceNow VR and a web UI, with a persistent state store feeding back.</desc>
+  <desc>Bitbucket, Snyk, Xray and a built-in multi-pass OpenHack whitebox engine feed a pipeline that ingests, deduplicates (deterministic then AI/Haiku), enriches with KEV/EPSS/reachability, runs AI exploitability and attack-chain analysis (Opus/Fable), scores, and assigns validation states, then exports to ServiceNow VR and a web UI, with a persistent state store feeding back. AI stages run concurrently and can auto-route their model tier by difficulty.</desc>
 
   <rect x="0" y="0" width="1000" height="660" fill="#ffffff"/>
 
@@ -23,9 +23,9 @@
     <text x="553" y="126" text-anchor="middle">JFrog Xray</text>
     <text x="553" y="143" text-anchor="middle" font-size="11" font-weight="400" fill="#64748b">artifacts / CVEs</text>
 
-    <rect x="668" y="100" width="220" height="52" rx="8" fill="#f1f5f9" stroke="#475569"/>
-    <text x="778" y="126" text-anchor="middle">OpenHack</text>
-    <text x="778" y="143" text-anchor="middle" font-size="11" font-weight="400" fill="#64748b">whitebox review</text>
+    <rect x="668" y="100" width="220" height="52" rx="8" fill="#e8f0ff" stroke="#3b6fe0"/>
+    <text x="778" y="126" text-anchor="middle" fill="#1d4ed8">OpenHack</text>
+    <text x="778" y="143" text-anchor="middle" font-size="11" font-weight="400" fill="#3b6fe0">whitebox · built-in · ×N passes</text>
   </g>
 
   <!-- source arrows into intake bar -->
@@ -85,6 +85,9 @@
     <!-- Enrich (Row A) down and back to Exploitability (Row B) -->
     <path d="M771,320 L771,336 L199,336 L199,352"/>
   </g>
+
+  <!-- AI-stage note -->
+  <text x="500" y="432" text-anchor="middle" font-size="10.5" fill="#3b6fe0">AI stages run concurrently (bounded) · models auto-route by difficulty when enabled (Haiku↔Sonnet↔Opus↔Fable)</text>
 
   <!-- OUTPUTS -->
   <text x="40" y="480" font-size="11" font-weight="700" letter-spacing="1" fill="#94a3b8">OUTPUTS</text>

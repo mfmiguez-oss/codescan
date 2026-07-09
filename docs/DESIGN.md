@@ -101,10 +101,10 @@ ServiceNow-ready output on its own.
 
 | Layer | Modules | Responsibility |
 |---|---|---|
-| Connectors | `connectors/` | Talk to external systems; emit/consume raw scanner shapes. |
-| Domain model | `models.py` | Canonical `Finding`, fingerprinting, state enums. |
+| Connectors | `connectors/`, `openhack_engine.py`, `openhack_runner.py` | Talk to external systems; emit/consume raw scanner shapes; in-process whitebox review. |
+| Domain model | `models.py` | Canonical `Finding`, fingerprinting, state enums, difficulty signals. |
 | Processing | `dedup*.py`, `enrich/`, `exploitability.py`, `scoring.py`, `validation.py`, `threatmodel.py` | Transform findings; synthesize threat models. |
-| AI infrastructure | `llm.py` | Model routing + structured-output client. |
+| AI infrastructure | `llm.py`, `providers/`, `concurrency.py` | Model routing (+ auto-route), multi-provider client, bounded parallelism. |
 | Orchestration | `pipeline.py` | Wire stages together; two ingest modes. |
 | Interfaces | `cli.py`, `web.py`, `static/` | CLI, HTTP API, dashboard. |
 
@@ -163,20 +163,38 @@ The offline path is not just for demos: it makes the whole pipeline runnable in
 CI, in tests, and against archived scan data with zero credentials.
 
 **Findings sources are also pluggable.** Beyond Snyk/Xray (SCA/CVE), a third
-source — Hadrian **OpenHack** (`connectors/openhack.py`) — ingests whitebox
-source-review findings from an OpenHack run directory (`finding-candidates/*.json`).
-These are first-party source issues with no CVE (dedup keys on title + path);
-they carry severity, target path, description, remediation, and OWASP/CWE-class
-tags, and flow through the same normalize → dedup → score → triage path. This
-gives codescan findings for repos the SCA/CVE scanners never covered.
-codescan can either **ingest** an existing OpenHack run directory, or
-**auto-invoke** OpenHack during a live scan (`openhack_runner.py`): with
-`openhack.auto`, it clones the target repo and runs a configured `command`
-(`{repo_path}`/`{output_dir}` substituted, AI-provider env passed through), then
-ingests the output. The command is configurable because OpenHack is a multi-phase
-agentic tool with its own LLM setup — codescan drives the invocation and reads
-the result rather than reimplementing OpenHack's loop. Fixtures
-under `fixtures/` drive the default UI and the test suite.
+source — **OpenHack** (`connectors/openhack.py`) — ingests whitebox
+source-review findings (`finding-candidates/*.json`). These are first-party source
+issues with no CVE (dedup keys on title + path); they carry severity, target path,
+description, remediation, and OWASP/CWE-class tags, and flow through the same
+normalize → dedup → score → triage path. This gives codescan findings for repos
+the SCA/CVE scanners never covered. There are three ways to produce them:
+
+1. **Built-in engine (default auto).** `openhack_engine.py` is an in-process
+   whitebox review that runs against a cloned repo using codescan's own
+   multi-provider LLM harness (§5.5) — no external tool. It walks the source,
+   skips dependency/build/VCS dirs, reviews the security-relevant files first
+   (auth, handlers, queries, uploads, crypto), batches source within a character
+   budget, and asks the model (routed via the `openhack` task) for concrete,
+   code-grounded vulnerabilities, writing OpenHack-schema finding candidates the
+   connector ingests. This is what makes "auto" mode work inside codescan with the
+   AI stages enabled.
+2. **External command.** Set `openhack.command` to shell out to a separate
+   OpenHack install; `{repo_path}`/`{output_dir}` are substituted and AI-provider
+   env is passed through. `openhack_runner.py` clones the repo, dispatches to the
+   built-in engine or the external command, and hands the output dir to the
+   connector.
+3. **Ingest an existing run** directory produced by any OpenHack run.
+
+**Multiple review passes (recall).** AI source review is non-deterministic, so the
+built-in engine runs `openhack.passes` independent passes (default **2**) and
+**unions** the results — a vulnerability found in any pass is reported, so more
+passes miss fewer. Duplicates across passes are consolidated on
+(file, vulnerability class, title), keeping the strongest severity/confidence seen
+and recording cross-pass agreement: a finding seen in every pass is tagged
+`corroborated`, one seen once `single-pass`, with an "identified in N of M passes"
+note — a confidence signal that survives to the `Finding`. Fixtures under
+`fixtures/` drive the default UI and the test suite.
 
 **Repo source is pluggable.** The repo inventory comes from either Bitbucket
 Data Center (`bitbucket.py`) or GitHub / GitHub Enterprise Server (`github.py`),
@@ -268,8 +286,9 @@ Different tasks need different intelligence tiers:
 
 | Task | Default tier | Rationale |
 |---|---|---|
-| `dedup` | **Haiku 4.5** (effort n/a, 8k tokens) | Mechanical "same vulnerability?" judgement. |
+| `dedup` / `enrichment` | **Haiku 4.5** (effort n/a, 8k tokens) | Mechanical judgement. |
 | `exploitability` | **Opus 4.8** (high effort, 32k) → Fable 5 for hardest chaining | Deep, judgement-heavy reasoning. |
+| `threat_model` / `openhack` | default tier (`ai.model`) | Deep reasoning; route to Sonnet for cost. |
 | *(anything else)* | default tier (`ai.model`) | Fallback. |
 
 `LLMClient` adapts each request to the model's capabilities so callers never
@@ -279,6 +298,29 @@ tooling can trip false-positive classifier refusals; the request transparently
 re-serves on Opus 4.8 in the same call). Config `ai.tasks.<name>` overrides any
 field per task. Adding a new AI stage is a one-liner: name a task, optionally
 give it a built-in tier.
+
+**Silent adaptive routing (`ai.auto_route`).** Off by default. When enabled, each
+AI call is nudged up or down an Anthropic capability ladder —
+**Haiku → Sonnet → Opus → Fable** — *relative to* its configured tier, by a
+difficulty signal the calling stage computes (`group_difficulty` /
+`size_difficulty` in `models.py`): a single low-severity finding downgrades
+(cheaper), while an actively-exploited (KEV), multi-critical, or large group
+upgrades (stronger reasoning). It only shifts Anthropic models that sit on the
+ladder — a custom model id or another supplier is left exactly as configured — and
+clamps at both ends. Enabling it is the operator's explicit opt-in; thereafter it
+applies silently per call (`auto_route` in `llm.py`).
+
+**Bounded concurrency (`ai.max_concurrency`, default 4).** The judgement-heavy
+stages issue one request per repo/service; those requests are independent, so the
+pipeline runs up to `max_concurrency` of them at once (`concurrency.py`,
+order-preserving `map_workers`) — compute in parallel, apply sequentially, so
+output stays deterministic. It's a latency optimization only (same requests, same
+cost) and is bounded to stay within provider rate limits. Applies to
+exploitability, threat modeling, AI enrichment, and semantic dedup.
+
+**No prompt caching (deliberate).** The static system prompts sit far below the
+model's minimum cacheable-prefix size and each request's payload differs, so a
+cache breakpoint would never hit — it is omitted rather than added as dead weight.
 
 ### 5.6 Composite scoring (`scoring.py`)
 
@@ -420,6 +462,10 @@ sequenceDiagram
   CLI->>P: run(mode)
   P->>BB: list repos
   P->>SC: fetch findings
+  opt OpenHack auto (AI enabled)
+    P->>LLM: whitebox review · ×N passes (openhack task)
+    LLM-->>P: finding candidates (unioned, agreement-tagged)
+  end
   P->>P: normalize + deterministic dedup
   opt AI enabled
     P->>LLM: dedup task (Haiku)
@@ -428,13 +474,17 @@ sequenceDiagram
   P->>EN: KEV / EPSS lookup
   EN-->>P: signals
   opt AI enabled
-    P->>LLM: exploitability task (Opus/Fable)
+    P->>LLM: exploitability task (Opus/Fable) — per service, concurrent
     LLM-->>P: per-finding scores + chains
   end
   P->>P: composite score + validation states
   P->>SN: build/push vulnerable items
   P-->>CLI: PipelineResult (findings, chains, items)
 ```
+
+The per-service AI calls (dedup, exploitability, threat modeling, enrichment) run
+up to `ai.max_concurrency` at a time, and — when `ai.auto_route` is on — each
+silently picks a cheaper or stronger model tier by difficulty (§5.5).
 
 ---
 
@@ -449,6 +499,10 @@ sequenceDiagram
 | Structured outputs (JSON Schema) | Parse free-text | Guaranteed-parseable responses; no brittle scraping. |
 | Per-service chaining scope | Whole-estate chaining | Meaningful (connected components) and tractable (bounded request size). |
 | Task-based model routing | One model everywhere | Haiku for mechanical work, Opus/Fable for reasoning — right cost per task. |
+| Built-in in-process OpenHack engine | Require an external OpenHack install | "Auto" mode works inside codescan with no extra tooling; the external command stays supported as an override. |
+| Multi-pass whitebox review (default 2), union + agreement | Single pass | AI review is non-deterministic; unioning passes raises recall, and cross-pass agreement is a confidence signal. |
+| Opt-in silent auto-route (relative to configured tier) | Fixed tiers only; or always-on downgrade | Adapts cost/quality per call by difficulty; opt-in keeps the default deterministic and the choice the operator's. |
+| Bounded concurrency across per-service calls | Sequential | Independent I/O-bound calls; parallelism cuts wall-clock time with deterministic apply order and no cost change. |
 | Composite score with KEV floor | Rank by CVSS | CVSS mis-ranks; the blend + floor put actively-exploited and chainable issues on top. |
 | Persistent, human-tagged validation states | Recompute every run | Analyst decisions must survive rescans; machine proposals stay re-derivable. |
 | Idempotent export via `correlation_id` | Insert-only | Prevents duplicate VR items and re-opening closed ones across daily runs. |
@@ -529,8 +583,9 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   single non-root container that writes runtime artifacts to a `/data` volume;
   secrets are injected via environment). Horizontal scale needs the shared
   datastore above.
-- **AI concurrency.** Per-service calls are serial today; parallelizing or moving
-  to the Batches API would cut wall-clock time on large estates.
+- **AI concurrency.** Per-service calls now run with bounded parallelism
+  (`ai.max_concurrency`, §5.5); moving to the Batches API would cut cost a further
+  ~50% for non-latency-sensitive runs.
 - **ServiceNow field mapping** targets a generic `sn_vul_vulnerable_item` import;
   it must be aligned to each deployment's VR transform map.
 - **No auth on the web UI.** The dashboard assumes a trusted network / upstream
@@ -545,7 +600,13 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   scoring, validation states, ServiceNow record shape, and persisted closures.
 - **Model router** (`tests/test_llm_router.py`) — pure resolution logic
   (Haiku default for dedup, default-tier fallback, override precedence,
-  partial-override inheritance); no network/key.
+  partial-override inheritance) plus **auto-route** (up/down ladder shift,
+  end-clamping, custom-model and non-Anthropic passthrough); no network/key.
+- **OpenHack engine** (`tests/test_openhack_engine.py`) — file selection,
+  dependency-dir skipping, min-confidence, and **multi-pass union + cross-pass
+  agreement** with a stubbed LLM; the connector's tag-merge in `test_openhack.py`.
+- **Concurrency** (`tests/test_concurrency.py`) — order preservation, genuine
+  parallelism (barrier), and the single-item sequential fallback.
 - **Web API** (`tests/test_web.py`) — FastAPI TestClient over the state,
   scan, state-change (incl. persistent-across-rescan), validation, and ServiceNow
   endpoints.
@@ -559,10 +620,16 @@ points validated by contract (schema) rather than live calls.
 
 `config/config.example.yaml` (secrets via `${ENV}`):
 
-- `ai` — default tier + per-task routing (`tasks.dedup`, `tasks.exploitability`).
-- `bitbucket` / `snyk` / `xray` — endpoints, tokens, project scoping, TLS.
-- `servicenow` — instance, credentials, `push` toggle, import table.
-- `enrichment` — KEV/EPSS feed URLs.
+- `ai` — default tier + per-task routing (`tasks.<name>`), plus `max_concurrency`
+  (bounded parallelism) and `auto_route` (silent adaptive tier selection).
+- `source` / `bitbucket` / `github` — repo inventory (scan surface), tokens, scoping, TLS.
+- `snyk` / `xray` — findings endpoints, tokens, TLS.
+- `openhack` — whitebox review: `enabled`/`findings_dir` (ingest), `auto`/`clone`/
+  `command` (run), and built-in-engine tuning (`passes`, `max_files`,
+  `max_file_bytes`, `min_confidence`).
+- `servicenow` — instance, credentials, `push` toggle, import table, `format`.
+- `enrichment` — KEV/EPSS feed URLs + per-enricher toggles.
+- `threat_model` — `enabled`.
 - `scoring` — dimension weights + `kev_floor`.
 
 CLI: `codescan scan` (pipeline), `codescan serve` (UI), `codescan summary`

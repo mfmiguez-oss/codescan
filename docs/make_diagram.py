@@ -57,7 +57,7 @@ def main() -> None:
     box(ax, 48, 100, 200, 52, "SCM source", "Bitbucket / GitHub", IO)
     box(ax, 288, 100, 150, 52, "Snyk", "SCA / SAST", IO)
     box(ax, 478, 100, 150, 52, "JFrog Xray", "artifacts / CVEs", IO)
-    box(ax, 668, 100, 220, 52, "OpenHack", "whitebox review", IO)
+    box(ax, 668, 100, 220, 52, "OpenHack", "whitebox · built-in · ×N passes", AI)
     for sx in (148, 363, 553, 778):
         arrow(ax, (sx, 152), (sx, 196))
 
@@ -85,6 +85,11 @@ def main() -> None:
     # enrich -> exploitability elbow
     ax.plot([771, 771, 199], [320, 338, 338], color=GRAY, linewidth=1.8, zorder=1)
     arrow(ax, (199, 338), (199, 352))
+
+    # AI-stage note: concurrency + adaptive routing
+    ax.text(500, 432, "AI stages run concurrently (bounded) · models auto-route by "
+            "difficulty when enabled (Haiku↔Sonnet↔Opus↔Fable)",
+            ha="center", va="center", fontsize=8.6, color=BLUE)
 
     # outputs
     label(40, 480, "OUTPUTS")
