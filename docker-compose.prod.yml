@@ -1,0 +1,38 @@
+# Production preset: live scan (Bitbucket/Snyk/Xray) + AI stages, pushing to
+# ServiceNow. Everything is environment-driven — no rebuild to reconfigure.
+#
+#   1. cp .env.example .env    # fill in ANTHROPIC_API_KEY, GITHUB_*/BITBUCKET_*,
+#                              #   SNYK_*, XRAY_*, SERVICENOW_*
+#   2. put your config at ./config/config.yaml (set servicenow.push: true to POST)
+#   3. docker compose -f docker-compose.prod.yml up -d --build
+#
+# Run a SINGLE instance: scan state is held in memory (see the design doc for the
+# shared-datastore path to HA). Put it behind your SSO / reverse proxy — the UI
+# has no built-in auth.
+services:
+  codescan:
+    build: .
+    image: codescan:latest
+    ports:
+      # Bind to loopback; terminate TLS + auth at a reverse proxy in front of this.
+      - "127.0.0.1:8000:8000"
+    environment:
+      CODESCAN_HOST: "0.0.0.0"
+      CODESCAN_PORT: "8000"
+      CODESCAN_AI: "true"     # exploitability, chaining, threat modeling, dedup, OpenHack
+      CODESCAN_LIVE: "true"   # scan live Bitbucket/Snyk/Xray instead of fixtures
+      CODESCAN_CONFIG: "/app/config/config.yaml"
+    # Secrets stay in the environment (config uses ${ENV} interpolation).
+    env_file:
+      - .env
+    volumes:
+      # Persist ServiceNow export, validation state, config overrides, threat models.
+      - codescan-data:/data
+      # Your config over the baked-in default (read-only).
+      - ./config:/app/config:ro
+    restart: unless-stopped
+    # Rely on the image's /healthz HEALTHCHECK; a failed initial live scan is
+    # surfaced in the UI, not fatal.
+
+volumes:
+  codescan-data:

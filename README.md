@@ -425,6 +425,52 @@ and provide the secrets — `docker run --env-file .env …`, or uncomment
 - Scan state is held **in memory**, so run a **single instance** (horizontal
   scale needs the shared datastore noted in the design doc).
 
+## Deployment & operations
+
+**Which path to use:**
+
+| Goal | How |
+|---|---|
+| Evaluate / demo | `docker compose up --build` (offline, no key) — or `codescan serve`. |
+| Try the AI stages | `codescan serve --ai` with `ANTHROPIC_API_KEY` set. |
+| **Production** (live → ServiceNow) | The container with a production preset — see below. |
+
+**Production — recommended.** A ready preset is shipped as
+[`docker-compose.prod.yml`](docker-compose.prod.yml) (AI + live on, `env_file:
+.env`, your config mounted, loopback-bound for a proxy in front):
+
+```bash
+cp .env.example .env                  # ANTHROPIC_API_KEY, GITHUB_*/BITBUCKET_*, SNYK_*, XRAY_*, SERVICENOW_*
+cp config/config.example.yaml config/config.yaml   # set servicenow.push: true to POST
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+**Operating it:**
+
+- **One replica.** Scan state is in memory — do not horizontally scale the web
+  server. Run it behind your **SSO / reverse proxy** (the UI has no built-in auth)
+  and terminate TLS there.
+- **Persist `/data`.** The ServiceNow export, validation-state store, config
+  overrides, and `threat_models.json` live there. The state store is what makes
+  rescans idempotent (via `correlation_id`) and keeps analyst decisions from being
+  overturned — back it up.
+- **Recurring scans.** Run the one-shot CLI on a schedule (cron / k8s CronJob / CI)
+  rather than relying on the long-lived server: `codescan scan --config
+  config/config.yaml`. Repeated imports are safe — no duplicate VR items, no
+  re-opening closed ones.
+- **Harden repo mapping before trusting live runs.** Snyk projects / Xray builds
+  map back to repos by slug today (`pipeline._ingest_live`); wire this to your real
+  naming convention (project tags, build metadata).
+- **Secrets stay in the environment** — the image holds none; provide them via
+  `--env-file` / your orchestrator's secret store, never baked into config or the
+  image.
+
+**Tuning for scale/cost** (all in config or the Config tab): `ai.max_concurrency`
+(parallel per-service calls — latency), `ai.auto_route` (silent per-call tier
+selection — cost), `ai.tasks.{openhack,threat_model}` → Sonnet (route the
+token-heavy stages cheaper), and `openhack.passes` (recall vs. cost of the whitebox
+review). See [Efficiency & cost](#efficiency--cost).
+
 ## Layout
 
 ```
