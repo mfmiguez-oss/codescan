@@ -261,15 +261,19 @@ then tick **live** and **Run scan** from the header.
 
 ### OpenHack (whitebox source review)
 
-For a repo that Snyk/Xray haven't scanned, use Hadrian
-**[OpenHack](https://github.com/hadriansecurity/openhack)** to generate findings
-directly from source, then ingest them. OpenHack is an agentic review tool you
-run separately; it writes findings to a run directory
-(`runs/<target>/<run-id>/finding-candidates/*.json`).
+For a repo that Snyk/Xray haven't scanned, OpenHack-style
+**[whitebox review](https://github.com/hadriansecurity/openhack)** generates
+findings directly from source. codescan supports three ways to get them:
 
-Point codescan at that output — in the **Config** tab under **OpenHack**: enable
-it, set **Findings dir** to the run dir (or its `finding-candidates/`), and set
-**Repo** to `owner/name`; or in config:
+1. **Built-in engine (default auto).** codescan runs its own in-process review of
+   the repo's source during a live scan — no external tool. See *Auto-run* below.
+2. **External OpenHack.** Shell out to a separate OpenHack install. See *Auto-run*.
+3. **Ingest an existing run.** Point codescan at output another OpenHack run wrote
+   to `runs/<target>/<run-id>/finding-candidates/*.json`.
+
+For (3), point codescan at that output — in the **Config** tab under **OpenHack**:
+enable it, set **Findings dir** to the run dir (or its `finding-candidates/`), and
+set **Repo** to `owner/name`; or in config:
 
 ```yaml
 openhack:
@@ -282,23 +286,44 @@ codescan reads the finding-candidate JSON, normalizes each to a `Finding` (no
 CVE; carries severity, target path, description, remediation, and OWASP/CWE-class
 tags), then dedups, scores, and triages them alongside any Snyk/Xray findings.
 
-**Auto-run.** codescan can also *invoke* OpenHack as part of a live scan and
-ingest the output — set `openhack.auto` and a `command` that runs OpenHack for
-the repo (`{repo_path}` / `{output_dir}` are substituted; the AI-provider env
-vars are passed through to the subprocess):
+**Auto-run — built-in engine (no external tool).** codescan ships its own
+in-process whitebox review engine (`openhack_engine.py`), so a live scan can run
+OpenHack-style source review with nothing to install. Set `openhack.auto` (and
+keep `command` empty) and codescan clones the target repo, reviews its source
+with the multi-provider LLM harness, writes OpenHack-schema `finding-candidates/`,
+and ingests them — all in one scan:
 
 ```yaml
 openhack:
   auto: true
   clone: true                 # git clone the target repo first
   workspace: .openhack
+  # command left empty -> codescan's built-in engine (needs the AI stages enabled)
+  max_files: 60               # cap source files reviewed per repo (cost/latency)
+  max_file_bytes: 60000       # skip files larger than this
+  min_confidence: low         # drop candidates below this confidence
+```
+
+The engine walks the repo, skips dependency/build/VCS dirs (`node_modules`,
+`vendor`, `dist`, `.git`, …), reviews the security-relevant files first (auth,
+handlers, queries, uploads, crypto), batches source within a character budget,
+and asks the model for concrete, code-grounded vulnerabilities (injection, broken
+access control, SSRF, path traversal, deserialization, hardcoded secrets, …).
+Route its model/effort via the `openhack` task (defaults to the deep default
+tier; set `claude-fable-5` for the deepest review).
+
+**Auto-run — external OpenHack.** To use a separate OpenHack install instead, set
+`command` to your invocation; `{repo_path}` / `{output_dir}` are substituted and
+the AI-provider env vars pass through to the subprocess:
+
+```yaml
+openhack:
+  auto: true
   command: ["bash", "run_openhack.sh", "{repo_path}", "{output_dir}"]
 ```
 
-The command is configurable because OpenHack is a multi-phase agentic tool with
-its own LLM/automation setup — codescan runs your invocation (its wrapper or
-one-shot) and reads the resulting `finding-candidates/`. Same fields are editable
-in the Config tab under **OpenHack**.
+codescan runs your invocation and reads the resulting `finding-candidates/`.
+All of these fields are editable in the Config tab under **OpenHack**.
 
 Inspect a produced import file:
 
@@ -347,6 +372,8 @@ src/codescan/
   config.py            config loading with ${ENV} interpolation
   models.py            canonical Finding model + fingerprint + VR state map
   connectors/          bitbucket / github (sources) · snyk / xray / openhack (findings)
+  openhack_engine.py   built-in in-process whitebox source-review engine (deep tier)
+  openhack_runner.py   auto-run OpenHack (built-in engine or external command)
   llm.py               model router (task -> tier) + shared structured client
   dedup.py             deterministic cross-scanner merge
   dedup_ai.py          semantic near-duplicate merge (lower-cost tier / Haiku)

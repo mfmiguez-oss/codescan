@@ -63,20 +63,29 @@ xray:
   token: ${XRAY_TOKEN}
   verify_tls: true
 
-# Hadrian OpenHack whitebox-review findings (https://github.com/hadriansecurity/openhack).
-# Run OpenHack on the repo first, then point codescan at the run's output. Covers
-# repos that Snyk/Xray haven't scanned. Also settable in the config UI.
+# OpenHack whitebox source review. Covers repos that Snyk/Xray haven't scanned by
+# reviewing source directly. Three ways to use it (also settable in the config UI):
+#   1. Built-in engine (default): with auto:true and an empty command, codescan
+#      runs its own in-process review over the cloned source (needs AI enabled).
+#   2. External command: point `command` at a separate OpenHack install.
+#   3. Ingest only: point `findings_dir` at an existing OpenHack run's output.
 openhack:
-  enabled: false         # ingest findings from findings_dir
+  enabled: false         # (mode 3) ingest findings from findings_dir
   findings_dir: ""       # e.g. runs/<target>/<run-id>  (or its finding-candidates/ dir)
   repo: ""               # owner/name — empty = the first scanned repo
-  # Or have codescan invoke OpenHack automatically during a live scan, then
-  # ingest its output. `command` runs OpenHack for the repo; {repo_path} and
-  # {output_dir} are substituted, and the AI-provider env vars are passed through.
-  auto: false
+  # Automatic invocation during a live scan.
+  auto: false            # run OpenHack for the target repo, then ingest its output
   clone: true            # git clone the target repo first
   workspace: .openhack   # where to clone / run
-  command: []            # e.g. ["bash", "run_openhack.sh", "{repo_path}", "{output_dir}"]
+  # Empty = codescan's built-in in-process engine. Set to shell out to an external
+  # OpenHack instead; {repo_path} and {output_dir} are substituted and AI-provider
+  # env vars pass through. e.g. ["bash", "run_openhack.sh", "{repo_path}", "{output_dir}"]
+  command: []
+  # Built-in engine tuning (ignored when `command` is set). Route model/effort via
+  # ai.tasks.openhack (defaults to the deep default tier).
+  max_files: 60          # cap source files reviewed per repo
+  max_file_bytes: 60000  # skip files larger than this
+  min_confidence: low    # drop candidates below this confidence: low | medium | high
 
 servicenow:
   instance: ${SERVICENOW_INSTANCE}

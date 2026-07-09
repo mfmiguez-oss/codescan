@@ -1,23 +1,26 @@
-"""Invoke OpenHack automatically during a live scan, then ingest its output.
+"""Run OpenHack automatically during a live scan, then ingest its output.
 
-OpenHack is an external, multi-phase agentic tool (it renders prompts you drive
-against an LLM). codescan doesn't reimplement that loop — it runs a configured
-command that performs an OpenHack run for a repo and writes findings, then the
-`OpenHackConnector` ingests the result. The command is configurable because the
-exact invocation depends on your OpenHack setup (its own automation/wrapper, and
-which LLM provider it uses); `{repo_path}` and `{output_dir}` are substituted.
+Two modes, chosen by config:
 
-Example config:
+* **Built-in engine (default).** With no external `command`, codescan runs its own
+  in-process whitebox review (`openhack_engine.OpenHackEngine`) over the cloned
+  source using the multi-provider LLM harness. This is what makes "auto" mode work
+  inside codescan with no external tool — it just needs the AI stages enabled.
+
+* **External command.** Set `openhack.command` to shell out to a separate OpenHack
+  install (its own automation/wrapper); `{repo_path}` and `{output_dir}` are
+  substituted and the subprocess inherits codescan's AI-provider env vars.
+
+Either way the result is a directory of finding candidates that
+`OpenHackConnector` ingests.
+
+Example config (external):
 
     openhack:
       auto: true
       clone: true
       workspace: .openhack
       command: ["bash", "run_openhack.sh", "{repo_path}", "{output_dir}"]
-
-The subprocess inherits the current environment, so whichever AI-provider keys
-codescan has (ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY) are available
-to OpenHack too.
 """
 
 from __future__ import annotations
@@ -27,21 +30,17 @@ import subprocess
 from pathlib import Path
 
 from .config import OpenHackConfig
+from .llm import LLMClient
 from .models import Repo
 
 
 class OpenHackRunner:
-    def __init__(self, cfg: OpenHackConfig) -> None:
+    def __init__(self, cfg: OpenHackConfig, llm: LLMClient | None = None) -> None:
         self.cfg = cfg
+        self.llm = llm
 
     def run(self, repo: Repo) -> str:
         """Run OpenHack for `repo` and return the output directory to ingest."""
-        if not self.cfg.command:
-            raise RuntimeError(
-                "openhack.auto is set but openhack.command is empty — provide the "
-                "command that runs OpenHack (e.g. a wrapper script) with "
-                "{repo_path}/{output_dir} placeholders."
-            )
         ws = Path(self.cfg.workspace or ".openhack")
         ws.mkdir(parents=True, exist_ok=True)
 
@@ -52,6 +51,30 @@ class OpenHackRunner:
         out_dir = ws / f"{repo.slug}-openhack-out"
         out_dir.mkdir(parents=True, exist_ok=True)
 
+        if self.cfg.command:
+            return self._run_external(repo_path, out_dir)
+        return self._run_builtin(repo, repo_path, out_dir)
+
+    # --- built-in in-process engine (default) ----------------------------
+    def _run_builtin(self, repo: Repo, repo_path: Path, out_dir: Path) -> str:
+        if self.llm is None:
+            raise RuntimeError(
+                "openhack.auto is set with no external openhack.command, so the "
+                "built-in review engine is used — but the AI stages are disabled. "
+                "Enable AI (drop --no-ai / set CODESCAN_AI) or set openhack.command."
+            )
+        if not repo_path.is_dir():
+            raise RuntimeError(
+                f"OpenHack has no source to review at {repo_path}: enable "
+                "openhack.clone (the repo needs a clone_url) or place the source there."
+            )
+        # Imported here so the engine's cost is only paid on the built-in path.
+        from .openhack_engine import OpenHackEngine
+
+        return OpenHackEngine(self.llm, self.cfg).review(repo_path, out_dir, repo.full_name)
+
+    # --- external OpenHack command ---------------------------------------
+    def _run_external(self, repo_path: Path, out_dir: Path) -> str:
         cmd = [
             arg.replace("{repo_path}", str(repo_path)).replace("{output_dir}", str(out_dir))
             for arg in self.cfg.command

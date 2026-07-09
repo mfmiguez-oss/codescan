@@ -78,7 +78,7 @@ class Pipeline:
             return GitHubConnector(self.cfg.github)
         return BitbucketConnector(self.cfg.bitbucket)
 
-    def _ingest_live(self) -> tuple[list[Repo], list[Finding]]:
+    def _ingest_live(self, llm: LLMClient | None = None) -> tuple[list[Repo], list[Finding]]:
         repos = self._repo_connector().list_repos()
         # Map scanner project/build names back to repo full names.
         repo_by_name = {r.slug: r.full_name for r in repos}
@@ -87,10 +87,11 @@ class Pipeline:
         findings = [*snyk, *xray]
         # OpenHack whitebox findings — covers repos the SCA/CVE scanners missed.
         oh = self.cfg.openhack
-        if oh.auto and oh.command and repos:
-            # Run OpenHack for the target repo, then ingest its output.
+        if oh.auto and repos:
+            # Run OpenHack (built-in engine, or external command) for the target
+            # repo, then ingest its output.
             target = next((r for r in repos if r.full_name == oh.repo), repos[0])
-            out_dir = OpenHackRunner(oh).run(target)
+            out_dir = OpenHackRunner(oh, llm=llm).run(target)
             findings.extend(OpenHackConnector().from_dir(out_dir, target.full_name))
         elif oh.enabled and oh.findings_dir:
             oh_repo = oh.repo or (repos[0].full_name if repos else "openhack")
@@ -128,13 +129,14 @@ class Pipeline:
         out_path: str | Path = "servicenow_import.json",
         state_path: str | Path | None = "validation_state.json",
     ) -> PipelineResult:
+        # Build one shared LLM client + task router for every AI stage — up front,
+        # so live ingest can hand it to the built-in OpenHack review engine.
+        llm = LLMClient(ModelRouter(self.cfg.ai)) if self.use_ai else None
+
         if fixtures:
             repos, raw = self._ingest_fixtures(Path(fixtures))
         else:
-            repos, raw = self._ingest_live()
-
-        # Build one shared LLM client + task router for every AI stage.
-        llm = LLMClient(ModelRouter(self.cfg.ai)) if self.use_ai else None
+            repos, raw = self._ingest_live(llm)
 
         findings = deduplicate(raw)                     # deterministic (free)
         if llm:

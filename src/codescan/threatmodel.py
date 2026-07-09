@@ -14,6 +14,7 @@ Optional and per-service (like exploitability), routed to the "threat_model" tas
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 
 from .llm import LLMClient
 from .models import Asset, EntryPoint, Finding, Severity, Stride, Threat, ThreatModel, finding_component_label, group_findings_by_repo

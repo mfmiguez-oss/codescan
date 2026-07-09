@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from ..models import Finding
 from .base import BaseEnricher
-from .enricher import _is_reachable_signal
 
 
 class ReachabilityEnricher(BaseEnricher):

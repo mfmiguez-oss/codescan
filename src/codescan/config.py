@@ -89,8 +89,8 @@ class XrayConfig(BaseModel):
 
 
 class OpenHackConfig(BaseModel):
-    """Ingest Hadrian OpenHack whitebox-review findings — from an existing run
-    directory, or by invoking OpenHack automatically during a live scan."""
+    """OpenHack whitebox source review — codescan's built-in engine (default), an
+    external OpenHack `command`, or ingesting an existing run's findings dir."""
 
     enabled: bool = False       # ingest findings from `findings_dir`
     findings_dir: str = ""      # OpenHack run dir, or its finding-candidates/ folder
@@ -98,9 +98,18 @@ class OpenHackConfig(BaseModel):
 
     # --- automatic invocation (during a live scan) ---
     auto: bool = False          # run OpenHack, then ingest its output
-    command: list[str] = []     # command to run; {repo_path} and {output_dir} are substituted
+    # command to run OpenHack externally; {repo_path} and {output_dir} are
+    # substituted. Empty = use codescan's built-in in-process engine (needs AI on).
+    command: list[str] = []
     workspace: str = ".openhack"  # dir to clone into and run under
     clone: bool = True          # git clone the target repo before running
+
+    # --- built-in engine tuning (ignored when an external `command` is set) ---
+    max_files: int = 60         # cap source files reviewed per repo (cost/latency)
+    max_file_bytes: int = 60000  # skip files larger than this (bytes)
+    batch_chars: int = 48000    # per-request source budget (chars) across files
+    min_confidence: str = "low"  # drop candidates below this confidence: low|medium|high
+    include_ext: list[str] = [] # source extensions to review; empty = built-in set
 
 
 class ServiceNowConfig(BaseModel):

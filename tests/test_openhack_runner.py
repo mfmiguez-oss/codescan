@@ -46,10 +46,38 @@ def test_run_substitutes_paths_and_output_is_ingestable(tmp_path, monkeypatch):
     assert [f.title for f in findings] == ["SQLi"]
 
 
-def test_run_requires_command(tmp_path):
-    cfg = OpenHackConfig(auto=True, command=[], workspace=str(tmp_path))
-    with pytest.raises(RuntimeError, match="command is empty"):
-        OpenHackRunner(cfg).run(_repo())
+def test_builtin_engine_used_when_no_command(tmp_path, monkeypatch):
+    # No external command + an LLM present => the in-process engine runs.
+    repo_path = tmp_path / "checkout"
+    repo_path.mkdir()
+
+    captured = {}
+
+    class FakeEngine:
+        def __init__(self, llm, cfg):
+            captured["built"] = True
+
+        def review(self, rp, out_dir, repo):
+            captured["review"] = (str(rp), str(out_dir), repo)
+            return str(out_dir)
+
+    monkeypatch.setattr("codescan.openhack_engine.OpenHackEngine", FakeEngine)
+
+    cfg = OpenHackConfig(auto=True, clone=False, command=[], workspace=str(tmp_path))
+    out_dir = OpenHackRunner(cfg, llm=object()).run(_repo())
+
+    assert captured["built"] is True
+    assert captured["review"][0].endswith("checkout")   # repo_path
+    assert captured["review"][2] == "acme/checkout"      # repo full name
+    assert out_dir.endswith("checkout-openhack-out")
+
+
+def test_builtin_engine_requires_ai(tmp_path):
+    # No command and no LLM (AI disabled) => actionable error, not a crash.
+    (tmp_path / "checkout").mkdir()
+    cfg = OpenHackConfig(auto=True, clone=False, command=[], workspace=str(tmp_path))
+    with pytest.raises(RuntimeError, match="AI stages are disabled"):
+        OpenHackRunner(cfg, llm=None).run(_repo())
 
 
 def test_run_surfaces_failure(tmp_path, monkeypatch):

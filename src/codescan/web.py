@@ -36,7 +36,7 @@ KNOWN_MODELS = [
     "claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-4-5",
 ]
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
-ROUTED_TASKS = ["dedup", "exploitability", "enrichment", "threat_model"]
+ROUTED_TASKS = ["dedup", "exploitability", "enrichment", "threat_model", "openhack"]
 SCM_PROVIDERS = ["bitbucket", "github"]
 
 
@@ -88,9 +88,14 @@ def sanitized_config(cfg: Config) -> dict:
             "findings_dir": cfg.openhack.findings_dir,
             "repo": cfg.openhack.repo,
             "auto": cfg.openhack.auto,
+            # Empty command = codescan's built-in in-process review engine.
             "command": " ".join(cfg.openhack.command),
+            "engine": "external" if cfg.openhack.command else "built-in",
             "workspace": cfg.openhack.workspace,
             "clone": cfg.openhack.clone,
+            "max_files": cfg.openhack.max_files,
+            "max_file_bytes": cfg.openhack.max_file_bytes,
+            "min_confidence": cfg.openhack.min_confidence,
         },
         "servicenow": {
             "instance": cfg.servicenow.instance,
@@ -172,6 +177,16 @@ def apply_config(cfg: Config, update: dict) -> None:
     if cfg.openhack.workspace == "":
         cfg.openhack.workspace = ".openhack"
     _set_bool(cfg.openhack, oh, "clone")
+    # Built-in engine tuning.
+    if oh.get("max_files"):
+        cfg.openhack.max_files = max(1, int(oh["max_files"]))
+    if oh.get("max_file_bytes"):
+        cfg.openhack.max_file_bytes = max(1, int(oh["max_file_bytes"]))
+    if oh.get("min_confidence"):
+        conf = str(oh["min_confidence"]).lower()
+        if conf not in ("low", "medium", "high"):
+            raise ValueError("openhack.min_confidence must be low, medium, or high")
+        cfg.openhack.min_confidence = conf
 
     src = update.get("source", {})
     if "provider" in src:
