@@ -150,9 +150,10 @@ class EnrichmentConfig(BaseModel):
 
 
 class ThreatModelConfig(BaseModel):
-    # Off by default — it's an extra deep-tier call per service. Route via the
-    # "threat_model" task in ai.tasks (defaults to the default tier).
-    enabled: bool = False
+    # On by default (only runs when the AI stages are enabled). It's an extra
+    # deep-tier call per service — set false to skip it, or route the
+    # "threat_model" task in ai.tasks to a cheaper tier.
+    enabled: bool = True
 
 
 class ScoringConfig(BaseModel):

@@ -123,9 +123,10 @@ enrichment:
   reachability_enabled: true
   ai_enabled: false
 
-# Per-service STRIDE threat modeling (AI, deep tier). Off by default — it's an
-# extra call per service. Route it via ai.tasks.threat_model (defaults to the
-# default tier; set to claude-fable-5 for the deepest analysis).
+# Per-service STRIDE threat modeling (AI, deep tier). On by default (only runs
+# when the AI stages are enabled) — set false to skip the extra call per service.
+# Route it via ai.tasks.threat_model (defaults to the default tier; set to
+# claude-fable-5 for the deepest analysis).
 threat_model:
   enabled: true
 

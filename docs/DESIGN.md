@@ -433,9 +433,11 @@ chains), threat modeling is the top-down counterpart. Per service it produces a
   The model is told to prefer fewer, well-grounded threats over generic ones.
 - **Posture** — an overall risk level, summary, and prioritized recommendations.
 
-It's optional (`threat_model.enabled`), per-service (like exploitability), routed
-to the `threat_model` task (the default deep tier unless overridden), and emits
-a `threat_models.json` artifact alongside the ServiceNow export. Threats
+It's **on by default** (`threat_model.enabled`; only runs when the AI stages are
+enabled — set false to skip the extra per-service call), per-service (like
+exploitability), routed to the `threat_model` task (the default deep tier unless
+overridden), and emits a `threat_models.json` artifact alongside the ServiceNow
+export. Threats
 reference findings by ID, so the UI cross-links both directions (a finding's
 drawer shows the threats it belongs to; a threat lists its findings).
 

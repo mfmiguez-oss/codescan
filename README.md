@@ -180,13 +180,14 @@ weight.
 
 ## Threat modeling
 
-Optional per-service **STRIDE threat model** (`threatmodel.py`, deep tier). Where
+Per-service **STRIDE threat model** (`threatmodel.py`, deep tier). Where
 exploitability works bottom-up (per-finding scores, chains), threat modeling is
 top-down: for each service it names the **assets**, **entry points / trust
 boundaries**, and **STRIDE threats** the findings and chains actually enable —
 each threat linked to its findings/chains, with likelihood, impact, and
-mitigations — plus an overall posture and recommendations. Enable it in config
-(`threat_model.enabled`) or the Config tab; it writes `threat_models.json` and
+mitigations — plus an overall posture and recommendations. **On by default** when
+the AI stages are enabled (`threat_model.enabled`; toggle in the Config tab, or
+set false to skip the extra per-service call). It writes `threat_models.json` and
 powers the Threats tab. Route it via the `threat_model` task (default deep tier;
 `claude-fable-5` for the deepest analysis).
 

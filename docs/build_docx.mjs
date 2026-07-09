@@ -233,7 +233,7 @@ const children = [
     "Threats — STRIDE-categorized, each citing the related finding IDs and chain IDs that evidence it, plus likelihood, impact, and mitigations. Prefer fewer, well-grounded threats over generic ones.",
     "Posture — an overall risk level, summary, and prioritized recommendations.",
   ]),
-  P("Optional (threat_model.enabled), per-service, routed to the threat_model task (the default deep tier unless overridden), and emits a threat_models.json artifact alongside the ServiceNow export. Threats reference findings by ID, so the UI cross-links both directions."),
+  P("On by default (threat_model.enabled; only runs when the AI stages are enabled — set false to skip the extra per-service call), per-service, routed to the threat_model task (the default deep tier unless overridden), and emits a threat_models.json artifact alongside the ServiceNow export. Threats reference findings by ID, so the UI cross-links both directions."),
   P("It feeds back into scoring. Because it runs before the scorer, apply_threat_influence writes results back onto findings: it records the citing threat IDs, derives a per-finding threat signal (0-100 from the strongest citing threat's likelihood), and raises the categorical exploitability level when the threat implies more than the isolated assessment did. The scorer reflects this through the exploitability dimension only, so the threat is counted once."),
 
   H1("6. Data flow — a scan"),
