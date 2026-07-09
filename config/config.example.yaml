@@ -130,6 +130,25 @@ enrichment:
 threat_model:
   enabled: true
 
+# Optional: pull secrets from HashiCorp Vault into the environment before the
+# ${ENV} interpolation above runs, so every token/password below resolves from
+# Vault with no other change. Needs `pip install 'codescan[vault]'` (hvac). The
+# Vault bootstrap creds themselves come from the environment.
+vault:
+  enabled: false
+  address: ${VAULT_ADDR}       # empty -> hvac uses VAULT_ADDR
+  namespace: ""                # Vault Enterprise namespace (optional)
+  auth: token                  # token | approle
+  token: ${VAULT_TOKEN}        # for auth: token (empty -> hvac uses VAULT_TOKEN)
+  role_id: ${VAULT_ROLE_ID}    # for auth: approle
+  secret_id: ${VAULT_SECRET_ID}
+  kv_mount: secret             # KV secrets-engine mount point
+  kv_version: 2                # 1 | 2
+  # Secret paths under the mount; each secret's keys become env vars (e.g. a
+  # secret at secret/codescan with an ANTHROPIC_API_KEY key sets that env var).
+  paths: ["codescan"]
+  override_env: false          # false = an already-set env var wins
+
 scoring:
   # Weights for the composite 0-100 risk score. Must sum to 1.0.
   weights:

@@ -156,6 +156,25 @@ class ThreatModelConfig(BaseModel):
     enabled: bool = True
 
 
+class VaultConfig(BaseModel):
+    """Optional HashiCorp Vault secret source (see `vault.py`). When enabled, KV
+    secrets are pulled into the environment before config interpolation, so the
+    rest of the config resolves from Vault via the same `${ENV}` seam."""
+
+    enabled: bool = False
+    address: str = ""            # Vault URL; empty -> hvac uses VAULT_ADDR
+    namespace: str = ""          # Vault Enterprise namespace (optional)
+    auth: str = "token"          # token | approle
+    token: str = ""              # empty -> hvac uses VAULT_TOKEN
+    role_id: str = ""            # approle
+    secret_id: str = ""          # approle
+    kv_mount: str = "secret"     # KV secrets-engine mount point
+    kv_version: int = 2          # 1 | 2
+    paths: list[str] = []        # secret paths under the mount; keys become env vars
+    override_env: bool = False   # false = an already-set env var wins
+    verify_tls: bool = True
+
+
 class ScoringConfig(BaseModel):
     weights: dict[str, float] = {
         "severity": 0.30,
@@ -178,8 +197,22 @@ class Config(BaseModel):
     enrichment: EnrichmentConfig = EnrichmentConfig()
     threat_model: ThreatModelConfig = ThreatModelConfig()
     scoring: ScoringConfig = ScoringConfig()
+    vault: VaultConfig = VaultConfig()
 
     @classmethod
     def load(cls, path: str | Path) -> "Config":
         raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+        # Vault first: pull secrets into the environment so the rest of the config
+        # resolves them via ${ENV} below. The vault section's own bootstrap creds
+        # (address/token/role) come from the environment, so interpolate it first.
+        _maybe_load_vault(raw.get("vault"))
         return cls.model_validate(_interpolate(raw))
+
+
+def _maybe_load_vault(raw_vault: Any) -> None:
+    if not isinstance(raw_vault, dict) or not raw_vault.get("enabled"):
+        return
+    cfg = VaultConfig.model_validate(_interpolate(raw_vault))
+    from .vault import load_secrets_into_env  # lazy: only import hvac path when used
+
+    load_secrets_into_env(cfg)

@@ -263,8 +263,8 @@ const children = [
 
   H1("8. Security & privacy"),
   ...bullets([
-    "What leaves the environment — the exploitability engine sends finding metadata (titles, CVEs, package coordinates, descriptions, deterministic signals) to the Anthropic API, not source code. Stricter deployments can run --no-ai (fully deterministic) or route to an approved Anthropic deployment.",
-    "Secrets — all credentials are injected via env vars / ${ENV} interpolation; none are committed. .gitignore excludes .env and generated output.",
+    "What leaves the environment — the exploitability, threat-modeling, dedup, and enrichment stages send finding metadata (titles, CVEs, package coordinates, descriptions, deterministic signals) to the model API, not source code. The exception is the built-in OpenHack engine, whose whole purpose is whitebox review: it sends selected first-party source file contents (off unless openhack.auto; bounded by max_files/max_file_bytes). Stricter deployments can run --no-ai, disable OpenHack while keeping the metadata-only stages, or route to an approved deployment.",
+    "Secrets — all credentials are injected via env vars / ${ENV} interpolation; none are committed. .gitignore excludes .env and generated output. Optionally fetched from HashiCorp Vault (vault.enabled, vault.py): KV secrets are injected into the environment before interpolation (token or AppRole auth, KV v1/v2, existing env wins unless override_env); Vault's own bootstrap creds come from the environment.",
     "Refusal handling — on Fable/Mythos the client opts into server-side fallbacks so a false-positive classifier refusal is transparently re-served; a genuine refusal surfaces as an error and deterministic scoring still stands.",
     "Least privilege — Bitbucket read, ServiceNow write to the import table only, scanner tokens read-only.",
     "Idempotency as integrity — correlation_id upserts prevent a misfired run from flooding VR with duplicates.",
@@ -320,6 +320,7 @@ const children = [
     "snyk / xray — findings endpoints, tokens, TLS.",
     "openhack — whitebox review: enabled/findings_dir (ingest), auto/clone/command (run), and built-in-engine tuning (passes, max_files, max_file_bytes, min_confidence).",
     "servicenow — instance, credentials, push toggle, import table, format.",
+    "vault — optional HashiCorp Vault secret source: enabled, address, auth (token/approle), kv_mount/kv_version, paths, override_env.",
     "enrichment — KEV/EPSS feed URLs + per-enricher toggles.",
     "threat_model — enabled.",
     "scoring — dimension weights + kev_floor.",

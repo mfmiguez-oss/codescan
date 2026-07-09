@@ -517,15 +517,24 @@ silently picks a cheaper or stronger model tier by difficulty (§5.5).
 This tool handles vulnerability data about first-party code and sends some of it
 to an LLM and to ServiceNow. Considerations:
 
-- **What leaves the environment.** The exploitability engine sends finding
-  metadata (titles, CVEs, package coordinates, descriptions, deterministic
-  signals) to the Anthropic API — **not** source code. Descriptions come from
-  scanner output. Deployments with stricter data-residency needs can disable the
-  AI stages (`--no-ai`) and run fully deterministic, or route to an approved
-  Anthropic deployment (Bedrock/Vertex/first-party) per policy.
-- **Secrets.** All credentials (Bitbucket, Snyk, Xray, ServiceNow, Anthropic)
-  are injected via env vars / `${ENV}` interpolation; none are committed.
-  `.gitignore` excludes `.env` and generated output.
+- **What leaves the environment.** The exploitability, threat-modeling, dedup, and
+  enrichment stages send finding *metadata* (titles, CVEs, package coordinates,
+  descriptions, deterministic signals) to the model API — **not** source code. The
+  one exception is the **built-in OpenHack engine**, whose whole purpose is
+  whitebox review: it sends selected first-party *source file contents* to the
+  model. It is off unless `openhack.auto` is set, and bounded by `max_files` /
+  `max_file_bytes`. Deployments with stricter data-residency needs can disable the
+  AI stages (`--no-ai`) and run fully deterministic, disable OpenHack while keeping
+  the metadata-only AI stages, or route to an approved model deployment
+  (Bedrock/Vertex/first-party) per policy.
+- **Secrets.** All credentials (Bitbucket, GitHub, Snyk, Xray, ServiceNow,
+  Anthropic) are injected via env vars / `${ENV}` interpolation; none are
+  committed. `.gitignore` excludes `.env` and generated output. Optionally, secrets
+  are fetched from **HashiCorp Vault** (`vault.enabled`, §5.1-adjacent `vault.py`):
+  KV secrets are injected into the environment before interpolation, so Vault
+  becomes the source of truth with the same seam — token or AppRole auth, KV v1/v2,
+  existing env wins unless `override_env`. Vault's own bootstrap creds come from the
+  environment.
 - **Refusal handling.** Security content can trip an LLM's safety classifiers.
   On Fable/Mythos the client opts into server-side fallbacks so a false-positive
   refusal is transparently re-served rather than failing the run; a genuine
@@ -633,6 +642,8 @@ points validated by contract (schema) rather than live calls.
 - `enrichment` — KEV/EPSS feed URLs + per-enricher toggles.
 - `threat_model` — `enabled`.
 - `scoring` — dimension weights + `kev_floor`.
+- `vault` — optional HashiCorp Vault secret source: `enabled`, `address`,
+  `auth` (token/approle), `kv_mount`/`kv_version`, `paths`, `override_env`.
 
 CLI: `codescan scan` (pipeline), `codescan serve` (UI), `codescan summary`
 (inspect an export). Flags gate AI (`--no-ai` / `--ai`), network enrichment

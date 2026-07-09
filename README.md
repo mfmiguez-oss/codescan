@@ -465,6 +465,31 @@ docker compose -f docker-compose.prod.yml up -d --build
   `--env-file` / your orchestrator's secret store, never baked into config or the
   image.
 
+**Secrets from HashiCorp Vault (built-in).** codescan can pull secrets straight
+from Vault. Install the extra (`pip install 'codescan[vault]'`) and enable it in
+config — at load, the listed KV secrets are fetched and injected into the
+environment *before* interpolation, so every `${…}` token (and `ANTHROPIC_API_KEY`)
+resolves from Vault with no other change:
+
+```yaml
+vault:
+  enabled: true
+  address: ${VAULT_ADDR}
+  auth: approle              # or token (uses VAULT_TOKEN)
+  role_id: ${VAULT_ROLE_ID}
+  secret_id: ${VAULT_SECRET_ID}
+  kv_mount: secret
+  paths: ["codescan"]        # secret/codescan's keys become env vars
+```
+
+Only Vault's own bootstrap creds come from the environment; the app secrets live
+in Vault. An already-set env var wins unless `override_env: true`. For Vault's
+short-lived **dynamic** secrets, prefer the per-run CLI (`codescan scan`) so each
+run gets fresh credentials — the long-lived server reads secrets once at startup.
+(You can equally keep zero code in the loop and use Vault Agent / the Secrets
+Operator / `envconsul` to render env vars; the built-in path just saves the
+sidecar.)
+
 **Tuning for scale/cost** (all in config or the Config tab): `ai.max_concurrency`
 (parallel per-service calls — latency), `ai.auto_route` (silent per-call tier
 selection — cost), `ai.tasks.{openhack,threat_model}` → Sonnet (route the
@@ -476,6 +501,7 @@ review). See [Efficiency & cost](#efficiency--cost).
 ```
 src/codescan/
   config.py            config loading with ${ENV} interpolation
+  vault.py             optional HashiCorp Vault secret source (env injection)
   models.py            canonical Finding model + fingerprint + VR state map
   connectors/          bitbucket / github (sources) · snyk / xray / openhack (findings)
   openhack_engine.py   built-in in-process whitebox source-review engine (deep tier)
