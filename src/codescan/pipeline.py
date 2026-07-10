@@ -37,7 +37,7 @@ from .openhack_runner import OpenHackRunner
 from .scoring import Scorer
 from .servicenow import ServiceNowExporter
 from .threatmodel import ThreatModelEngine, apply_threat_influence
-from .validation import StateStore, assign_states
+from .validation import assign_states, open_state_store
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +196,7 @@ class Pipeline:
 
         Scorer(self.cfg.scoring).score(findings, chains)
 
-        store = StateStore(state_path)
+        store = open_state_store(self.cfg.storage, state_path)
         # Calibrate scores from the org's accumulated confirm/false-positive history
         # (built from the store as loaded, i.e. prior decisions) before this run's
         # states are recorded.

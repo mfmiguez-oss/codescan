@@ -200,6 +200,18 @@ class VaultConfig(_StrictModel):
     verify_tls: bool = True
 
 
+class StorageConfig(_StrictModel):
+    """Where the validation-state store persists. `file` (default) = local JSON,
+    right for a single instance. `sql` = a shared database (Postgres/SQLite) so
+    multiple replicas / concurrent runners share one durable store (HA)."""
+
+    backend: str = "file"        # file | sql
+    # SQLAlchemy URL for backend=sql, e.g.
+    #   postgresql+psycopg://user:pass@host:5432/codescan   or   sqlite:///data/state.db
+    # Interpolate secrets from the environment: dsn: ${STATE_DB_DSN}
+    dsn: str = ""
+
+
 class FeedbackConfig(_StrictModel):
     """Learn from analysts' persisted confirm / false-positive decisions to nudge
     the risk score of new, similar findings (same weakness family or component).
@@ -243,6 +255,7 @@ class Config(_StrictModel):
     threat_model: ThreatModelConfig = ThreatModelConfig()
     scoring: ScoringConfig = ScoringConfig()
     feedback: FeedbackConfig = FeedbackConfig()
+    storage: StorageConfig = StorageConfig()
     vault: VaultConfig = VaultConfig()
     audit: AuditConfig = AuditConfig()
 

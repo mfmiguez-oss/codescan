@@ -166,6 +166,16 @@ vault:
   paths: ["codescan"]
   override_env: false          # false = an already-set env var wins
 
+# Where the validation-state store persists. "file" (default) = local JSON, right
+# for a single instance (mount /data to keep it). "sql" = a shared database so
+# multiple replicas / concurrent runners share one durable store (HA). Needs
+# `pip install 'codescan[sql]'` (SQLAlchemy) + a driver for Postgres (e.g. psycopg).
+storage:
+  backend: file          # file | sql
+  # SQLAlchemy URL for backend=sql (interpolate the secret from the environment):
+  #   dsn: ${STATE_DB_DSN}   # e.g. postgresql+psycopg://user:pass@db:5432/codescan
+  dsn: ""
+
 # Append-only audit log (JSONL) of key events — scan runs, config changes, and
 # validation-state changes — each with an actor + UTC timestamp. Viewable in the
 # UI's Audit tab and at GET /api/audit. Actor comes from your SSO/reverse-proxy

@@ -18,8 +18,10 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from abc import ABC, abstractmethod
 from pathlib import Path
 
+from .config import StorageConfig
 from .models import Finding, ValidationState
 
 # Terminal closure states that a rescan must not overturn, even if machine-recorded.
@@ -30,7 +32,24 @@ _TERMINAL_CLOSURE_STATES = {
 }
 
 
-class StateStore:
+class StateStoreBase(ABC):
+    """The persistence contract for validation decisions. The file-backed
+    `StateStore` and the DB-backed `SqlStateStore` are interchangeable behind it
+    (select via `storage.backend` and `open_state_store`)."""
+
+    @abstractmethod
+    def entry(self, finding_id: str) -> dict | None: ...
+    @abstractmethod
+    def prior(self, finding_id: str) -> ValidationState | None: ...
+    @abstractmethod
+    def all_entries(self) -> dict[str, dict]: ...
+    @abstractmethod
+    def record(self, finding: Finding, *, manual: bool = False) -> None: ...
+    @abstractmethod
+    def save(self) -> None: ...
+
+
+class StateStore(StateStoreBase):
     """Persists validation decisions across runs, keyed by finding fingerprint.
 
     Each entry records the state and whether a human set it (`manual`). Legacy
@@ -102,7 +121,127 @@ class StateStore:
             raise
 
 
-def assign_states(findings: list[Finding], store: StateStore) -> None:
+_DDL = (
+    "CREATE TABLE IF NOT EXISTS validation_state ("
+    " finding_id VARCHAR(64) PRIMARY KEY,"
+    " state VARCHAR(32) NOT NULL,"
+    " manual BOOLEAN NOT NULL,"
+    " cwes TEXT,"
+    " component TEXT)"
+)
+
+
+class SqlStateStore(StateStoreBase):
+    """Database-backed store (SQLAlchemy → Postgres / SQLite) for shared, HA use.
+
+    Writes are immediate and concurrency-safe: a manual (analyst) decision always
+    wins, while a machine proposal never overwrites an existing manual or terminal
+    decision — so a scheduled scan can't clobber triage an analyst made on another
+    replica. Reads use a snapshot loaded at construction (matching the file store's
+    semantics), so `save()` is a no-op.
+    """
+
+    def __init__(self, dsn: str) -> None:
+        try:
+            import sqlalchemy as sa
+        except ImportError as exc:  # pragma: no cover - exercised via message
+            raise RuntimeError(
+                "storage.backend='sql' needs SQLAlchemy — install it with: "
+                "pip install 'codescan[sql]' (plus a driver, e.g. psycopg, for Postgres)."
+            ) from exc
+        self._sa = sa
+        self._engine = sa.create_engine(dsn, future=True)
+        with self._engine.begin() as conn:
+            conn.execute(sa.text(_DDL))
+        self._entries: dict[str, dict] = self._load()
+
+    def _load(self) -> dict[str, dict]:
+        sa = self._sa
+        with self._engine.connect() as conn:
+            rows = conn.execute(sa.text(
+                "SELECT finding_id, state, manual, cwes, component FROM validation_state"
+            )).mappings().all()
+        out: dict[str, dict] = {}
+        for r in rows:
+            out[r["finding_id"]] = {
+                "state": _coerce_state(r["state"]),
+                "manual": bool(r["manual"]),
+                "cwes": json.loads(r["cwes"]) if r["cwes"] else [],
+                "component": r["component"] or "",
+            }
+        return out
+
+    def entry(self, finding_id: str) -> dict | None:
+        return self._entries.get(finding_id)
+
+    def all_entries(self) -> dict[str, dict]:
+        return self._entries
+
+    def prior(self, finding_id: str) -> ValidationState | None:
+        e = self._entries.get(finding_id)
+        return e["state"] if e else None
+
+    def record(self, finding: Finding, *, manual: bool = False) -> None:
+        entry = {
+            "state": finding.validation_state, "manual": manual,
+            "cwes": list(finding.cwe_ids), "component": finding.component.name,
+        }
+        self._write(finding.id, entry)
+        self._entries[finding.id] = entry
+
+    def save(self) -> None:
+        return  # writes are immediate
+
+    def _write(self, fid: str, entry: dict) -> None:
+        sa = self._sa
+        params = {
+            "id": fid, "state": entry["state"].value, "manual": entry["manual"],
+            "cwes": json.dumps(entry["cwes"]) if entry["cwes"] else None,
+            "component": entry["component"] or None,
+        }
+        terminal = [s.value for s in _TERMINAL_CLOSURE_STATES]
+        with self._engine.begin() as conn:
+            if entry["manual"]:
+                # Analyst decision always wins.
+                updated = conn.execute(sa.text(
+                    "UPDATE validation_state SET state=:state, manual=:manual,"
+                    " cwes=:cwes, component=:component WHERE finding_id=:id"), params).rowcount
+                if not updated:
+                    self._insert(conn, params)
+                return
+            # Machine proposal: only update a row that isn't a protected (manual or
+            # terminal) decision; insert if the row is absent.
+            stmt = sa.text(
+                "UPDATE validation_state SET state=:state, cwes=:cwes, component=:component"
+                " WHERE finding_id=:id AND manual=:false AND state NOT IN :terminal"
+            ).bindparams(sa.bindparam("terminal", expanding=True))
+            updated = conn.execute(stmt, {**params, "false": False, "terminal": terminal}).rowcount
+            if not updated:
+                exists = conn.execute(sa.text(
+                    "SELECT 1 FROM validation_state WHERE finding_id=:id"), {"id": fid}).fetchone()
+                if not exists:
+                    self._insert(conn, params)   # else the row is protected -> leave it
+
+    def _insert(self, conn, params: dict) -> None:
+        sa = self._sa
+        try:
+            conn.execute(sa.text(
+                "INSERT INTO validation_state (finding_id, state, manual, cwes, component)"
+                " VALUES (:id, :state, :manual, :cwes, :component)"), params)
+        except sa.exc.IntegrityError:
+            pass  # a concurrent writer inserted first — fine, their row stands
+
+
+def open_state_store(cfg: StorageConfig, path: str | Path | None) -> StateStoreBase:
+    """Pick the state-store backend from config: file (default) or a shared DB."""
+    if (cfg.backend or "file").lower() == "sql":
+        if not cfg.dsn:
+            raise RuntimeError("storage.backend='sql' requires storage.dsn (a SQLAlchemy URL)")
+        return SqlStateStore(cfg.dsn)
+    return StateStore(path)
+
+
+def assign_states(findings: list[Finding], store: StateStoreBase) -> None:
     for f in findings:
         e = store.entry(f.id)
         if e and (e["manual"] or e["state"] in _TERMINAL_CLOSURE_STATES):

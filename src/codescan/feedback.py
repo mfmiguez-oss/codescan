@@ -26,7 +26,7 @@ import logging
 
 from .config import FeedbackConfig
 from .models import Finding, ValidationState
-from .validation import StateStore
+from .validation import StateStoreBase
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ class FeedbackModel:
         self._neg: dict[str, set[str]] = {}
 
     @classmethod
-    def from_store(cls, store: StateStore) -> "FeedbackModel":
+    def from_store(cls, store: StateStoreBase) -> "FeedbackModel":
         m = cls()
         for fid, entry in store.all_entries().items():
             if not entry.get("manual"):
@@ -97,7 +97,7 @@ class FeedbackModel:
 
 
 def apply_feedback(
-    findings: list[Finding], store: StateStore, cfg: FeedbackConfig, kev_floor: float
+    findings: list[Finding], store: StateStoreBase, cfg: FeedbackConfig, kev_floor: float
 ) -> int:
     """Adjust findings' risk scores from the analyst-feedback prior, in place.
 

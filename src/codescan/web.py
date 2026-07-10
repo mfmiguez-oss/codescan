@@ -30,7 +30,7 @@ from .models import SERVICENOW_STATE, Finding, ValidationState
 from .pipeline import Pipeline, PipelineResult
 from .providers import PROVIDERS
 from .servicenow import ServiceNowExporter, items_to_csv
-from .validation import StateStore
+from .validation import open_state_store
 
 STATIC = Path(__file__).parent / "static"
 
@@ -401,7 +401,7 @@ class AppState:
             raise KeyError(fid)
         previous = f.validation_state.value
         f.validation_state = ValidationState(state)     # raises ValueError if invalid
-        store = StateStore(self.state_path)             # merge into existing decisions
+        store = open_state_store(self.cfg.storage, self.state_path)   # merge into existing decisions
         store.record(f, manual=True)
         store.save()
         self.audit.record("validation.changed", actor=actor, finding_id=fid,

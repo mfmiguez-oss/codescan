@@ -382,11 +382,18 @@ The pipeline **proposes** a conservative initial state (KEV or chained →
 confirmed; unreachable + low exploitability → under_investigation as a candidate
 FP; high score/severity → confirmed; else new). A human confirms or overrides.
 
-**Persistence** is the important property. The `StateStore` persists each
-decision keyed by fingerprint and tags whether a human set it (`manual`), along
-with the finding's weakness/component attributes. On rescan, `assign_states`
-honors any manual decision or terminal closure and never re-opens it — analyst
-effort is never silently discarded. Machine proposals remain re-derivable.
+**Persistence** is the important property. The store persists each decision keyed
+by fingerprint and tags whether a human set it (`manual`), along with the finding's
+weakness/component attributes. On rescan, `assign_states` honors any manual decision
+or terminal closure and never re-opens it — analyst effort is never silently
+discarded. Machine proposals remain re-derivable.
+
+The store is **pluggable** behind `StateStoreBase` (select via `storage.backend`,
+`open_state_store`): the file-backed `StateStore` (JSON, atomic writes — right for a
+single instance) or the DB-backed `SqlStateStore` (SQLAlchemy → Postgres/SQLite) for
+shared, HA use. The SQL backend's writes are concurrency-safe — a manual decision
+always wins and a machine proposal never overwrites a manual/terminal row — so
+multiple replicas or scheduled runners can share one store without clobbering triage.
 
 ### 5.7a Analyst-feedback loop (`feedback.py`)
 
@@ -625,6 +632,10 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
 - **Horizontal scale** path: the per-service AI calls are embarrassingly parallel
   — run concurrently (`ai.max_concurrency`) for latency, or via the Message
   Batches API (`ai.batch`) for ~50% cost on scheduled runs (§5.5).
+- **Shared state for HA:** the validation-state store is pluggable
+  (`storage.backend`) — the DB-backed `SqlStateStore` (Postgres/SQLite) lets
+  multiple replicas / scheduled runners share one durable, concurrency-safe store
+  (§5.7), so the single-writer constraint of the JSON file is not a hard ceiling.
 
 ---
 
@@ -638,13 +649,15 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
 - **SCA-oriented fingerprint.** Repo-level identity is right for dependency
   findings; SAST findings need path/line in the fingerprint. A `finding_kind`
   discriminator would let the fingerprint switch granularity.
-- **State store is a JSON file.** Fine for a single runner; a shared datastore is
-  needed for concurrent runners / HA.
-- **Single-instance runtime.** The web server holds scan state in memory, so it
-  runs as one replica (the shipped `Dockerfile` / `docker-compose.yml` deploy a
-  single non-root container that writes runtime artifacts to a `/data` volume;
-  secrets are injected via environment). Horizontal scale needs the shared
-  datastore above.
+- **State store backend.** The default JSON file is single-writer; for concurrent
+  runners / HA select `storage.backend: sql` (Postgres/SQLite via `SqlStateStore`,
+  §5.7). The audit log is still a local JSONL file (ship it to a SIEM, or give it a
+  DB backend next).
+- **Single-instance web UI.** The server holds the *scan result* in memory, so the
+  UI runs as one replica (the shipped `Dockerfile` / `docker-compose.yml` deploy a
+  single non-root container writing artifacts to a `/data` volume; secrets via
+  environment). The durable triage state can be shared via the SQL backend above;
+  the in-memory result is re-derived by scanning.
 - **AI cost/latency.** Per-service calls run with bounded parallelism
   (`ai.max_concurrency`) or, for ~50% cost on scheduled runs, the Message Batches
   API (`ai.batch`) — both via `complete_json_many` (§5.5). A shared prompt-cache
@@ -684,6 +697,9 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
 - **Feedback loop** (`tests/test_feedback.py`) — false-positive history lowers /
   confirmed raises the score, min-evidence gate, self-exclusion, KEV-floor respect,
   disabled no-op, accuracy-states-only, and store attribute round-trip.
+- **SQL state store** (`tests/test_state_store_sql.py`) — backend factory,
+  round-trip/persistence, the manual-not-clobbered-by-machine concurrency guard,
+  feedback over the SQL store, and a pipeline run persisting to SQLite.
 - **Web API** (`tests/test_web.py`) — FastAPI TestClient over state, scan,
   state-change (persistent-across-rescan), validation, ServiceNow, and the
   **API-token guard** (401 without, accepted via header/cookie, healthz open).
@@ -713,6 +729,7 @@ builds the image on every push/PR; `mypy` is a clean gate and the package ships
 - `threat_model` — `enabled`.
 - `scoring` — dimension weights + `kev_floor`.
 - `feedback` — analyst-feedback score prior: `enabled`, `max_adjust`, `min_evidence`.
+- `storage` — validation-state backend: `backend` (file/sql) + `dsn` (SQLAlchemy URL).
 - `vault` — optional HashiCorp Vault secret source: `enabled`, `address`,
   `auth` (token/approle), `kv_mount`/`kv_version`, `paths`, `override_env`.
 - `audit` — append-only JSONL audit log: `enabled`, `path`.

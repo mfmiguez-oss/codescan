@@ -513,8 +513,14 @@ docker compose -f docker-compose.prod.yml up -d --build
 
 **Operating it:**
 
-- **One replica.** Scan state is in memory — do not horizontally scale the web
-  server. Run it behind your **SSO / reverse proxy** and terminate TLS there.
+- **Replicas & persistence.** Scan *results* are held in memory (re-derived by
+  scanning), so run the web UI as a single replica behind your **SSO / reverse
+  proxy**. The durable **validation-state store** is pluggable via `storage.backend`:
+  `file` (default, local JSON on the `/data` volume — one writer) or **`sql`** (a
+  shared Postgres/SQLite database via `storage.dsn`) so multiple replicas /
+  concurrent scheduled runners share one store safely — a manual analyst decision
+  is never clobbered by a machine proposal. `pip install 'codescan[sql]'` (+ a
+  Postgres driver such as `psycopg`) for the SQL backend.
 - **API token (defense in depth).** Set `CODESCAN_API_TOKEN` and every `/api/*`
   request must present it — via `Authorization: Bearer <token>`, an `X-API-Token`
   header, or by visiting `/?token=<token>` once (which sets a cookie the browser
