@@ -595,12 +595,16 @@ to an LLM and to ServiceNow. Considerations:
 - **Fail-loud config.** Config models reject unknown keys (`extra="forbid"`), so a
   misspelled security setting fails at load rather than silently reverting to a
   default.
-- **Append-only audit log** (`audit.py`). Scan runs, config changes, and
-  validation-state changes are appended to a JSONL file with an actor + UTC
-  timestamp — a durable decision record for monitoring/auditing, distinct from the
-  operational logs. Actor attribution is best-effort from an SSO/reverse-proxy
-  identity header (`X-Remote-User` / `X-Forwarded-User`); behind such a proxy the
-  trail names real users. Surfaced in the UI's Audit tab and `GET /api/audit`.
+- **Append-only audit log → SIEM** (`audit.py`). Scan runs, config changes, and
+  validation-state changes are recorded with an actor + UTC timestamp — a durable
+  decision record for monitoring/auditing, distinct from the operational logs.
+  Events fan out to configurable **sinks**: a local JSONL **file** (default;
+  tail-able, and the source for `GET /api/audit` / the UI Audit tab) plus optional
+  **syslog** (Splunk/QRadar/ArcSight) and **HTTP** (Splunk HEC / Elastic / webhook)
+  sinks for direct SIEM ingestion. Push delivery is best-effort — a sink failure is
+  logged, never raised — so the file stays the durable record. Actor attribution is
+  best-effort from an SSO/reverse-proxy identity header (`X-Remote-User` /
+  `X-Forwarded-User`); behind such a proxy the trail names real users.
 
 ---
 
@@ -692,8 +696,9 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
 - **Vault** (`tests/test_vault.py`) — KV v1/v2 injection, override semantics, auth
   errors, and the `Config.load` wiring (fake client).
 - **Audit log** (`tests/test_audit.py`) — record/tail JSONL round-trip, disabled
-  no-op, pipeline scan events, and the web actor-attributed config/state events via
-  `GET /api/audit`.
+  no-op, pipeline scan events, web actor-attributed config/state events via
+  `GET /api/audit`, and the SIEM sinks (HTTP POST incl. HEC `event_key`, sink-failure
+  isolation, syslog smoke, bad-sink survivability).
 - **Feedback loop** (`tests/test_feedback.py`) — false-positive history lowers /
   confirmed raises the score, min-evidence gate, self-exclusion, KEV-floor respect,
   disabled no-op, accuracy-states-only, and store attribute round-trip.
@@ -732,7 +737,8 @@ builds the image on every push/PR; `mypy` is a clean gate and the package ships
 - `storage` — validation-state backend: `backend` (file/sql) + `dsn` (SQLAlchemy URL).
 - `vault` — optional HashiCorp Vault secret source: `enabled`, `address`,
   `auth` (token/approle), `kv_mount`/`kv_version`, `paths`, `override_env`.
-- `audit` — append-only JSONL audit log: `enabled`, `path`.
+- `audit` — append-only audit log: `enabled`, `path` (file sink), and `syslog` /
+  `http` sinks for SIEM ingestion.
 
 CLI: `codescan scan` (pipeline), `codescan serve` (UI), `codescan summary`
 (inspect an export). Flags gate AI (`--no-ai` / `--ai`), network enrichment

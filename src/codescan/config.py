@@ -222,14 +222,42 @@ class FeedbackConfig(_StrictModel):
     min_evidence: int = 2        # need at least this many prior manual decisions for a key
 
 
+class SyslogSinkConfig(_StrictModel):
+    """Forward audit events to a syslog collector (the classic SIEM path:
+    Splunk/QRadar/ArcSight/rsyslog). Each event is one JSON syslog message."""
+
+    enabled: bool = False
+    address: str = "localhost:514"   # host:port (TCP/UDP), or a socket path like /dev/log
+    protocol: str = "udp"            # udp | tcp
+    facility: str = "user"
+
+
+class HttpSinkConfig(_StrictModel):
+    """POST audit events to an HTTP collector — Splunk HEC, Elastic, Datadog, or a
+    generic webhook / log-shipper HTTP source."""
+
+    enabled: bool = False
+    url: str = ""
+    auth_header: str = "Authorization"
+    token: str = ""                  # interpolate from env: token: ${AUDIT_HTTP_TOKEN}
+    token_prefix: str = ""           # e.g. "Splunk " (HEC) or "Bearer "
+    event_key: str = ""              # wrap as {event_key: event}; set "event" for Splunk HEC
+    timeout: float = 5.0
+    verify_tls: bool = True
+
+
 class AuditConfig(_StrictModel):
     """Append-only audit log of key events (scan runs, config + validation-state
-    changes) with actor + timestamp, one JSON object per line (JSONL)."""
+    changes) with actor + timestamp, one JSON object per line (JSONL). Ships to a
+    SIEM via the optional syslog / HTTP sinks below (best-effort; the file stays the
+    durable local record and the source for GET /api/audit)."""
 
     enabled: bool = True
-    # File path; relative paths resolve next to the run's other artifacts
-    # (the ServiceNow export dir, e.g. /data in the container).
+    # Local JSONL file sink; relative paths resolve next to the run's other
+    # artifacts (e.g. /data). Empty string disables the file sink (push-only).
     path: str = "audit.jsonl"
+    syslog: SyslogSinkConfig = SyslogSinkConfig()
+    http: HttpSinkConfig = HttpSinkConfig()
 
 
 class ScoringConfig(_StrictModel):

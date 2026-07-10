@@ -182,7 +182,20 @@ storage:
 # identity header (X-Remote-User / X-Forwarded-User) when present.
 audit:
   enabled: true
-  path: audit.jsonl      # relative -> written next to the other run artifacts (/data)
+  path: audit.jsonl      # local JSONL sink (relative -> /data). "" = push-only.
+  # Ship to a SIEM (best-effort; the file stays the durable local record). The file
+  # is also tail-able by any forwarder (Filebeat/Fluent Bit/Vector).
+  syslog:                # classic SIEM path (Splunk/QRadar/ArcSight/rsyslog)
+    enabled: false
+    address: siem.internal:514   # host:port, or a socket path like /dev/log
+    protocol: udp        # udp | tcp
+    facility: user
+  http:                  # Splunk HEC / Elastic / Datadog / generic webhook
+    enabled: false
+    url: ""              # e.g. https://splunk:8088/services/collector/event
+    token: ${AUDIT_HTTP_TOKEN}
+    token_prefix: "Splunk "      # "Splunk " for HEC, "Bearer " for others
+    event_key: event     # wrap as {event: ...} for Splunk HEC; "" for a raw webhook
 
 scoring:
   # Weights for the composite 0-100 risk score. Must sum to 1.0.

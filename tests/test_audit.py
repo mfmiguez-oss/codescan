@@ -7,8 +7,9 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+import codescan.audit as audit_mod
 from codescan.audit import AuditLog
-from codescan.config import AuditConfig, Config
+from codescan.config import AuditConfig, Config, HttpSinkConfig, SyslogSinkConfig
 from codescan.pipeline import Pipeline
 from codescan.web import create_app
 
@@ -86,3 +87,57 @@ def test_web_startup_scan_is_audited(tmp_path):
     client = TestClient(_app(tmp_path))
     events = client.get("/api/audit").json()["events"]
     assert any(e["event"] == "scan.completed" and e["actor"] == "startup" for e in events)
+
+
+# --- SIEM sinks -----------------------------------------------------------
+
+class _FakeResp:
+    status_code, reason = 200, "OK"
+
+
+def test_http_sink_posts_events(tmp_path, monkeypatch):
+    posts = []
+    monkeypatch.setattr(audit_mod, "requests",
+                        type("R", (), {"post": staticmethod(lambda url, **kw: (posts.append((url, kw)), _FakeResp())[1])}))
+    cfg = AuditConfig(
+        path=str(tmp_path / "a.jsonl"),
+        http=HttpSinkConfig(enabled=True, url="https://siem/collector/event",
+                            token="tok", token_prefix="Splunk ", event_key="event"),
+    )
+    AuditLog(cfg).record("scan.completed", actor="cli", findings=6)
+
+    assert len(posts) == 1
+    url, kw = posts[0]
+    assert url == "https://siem/collector/event"
+    assert kw["headers"]["Authorization"] == "Splunk tok"
+    assert kw["json"] == {"event": {"ts": kw["json"]["event"]["ts"], "event": "scan.completed",
+                                    "actor": "cli", "findings": 6}}
+    # File sink still wrote it too (durable local record).
+    assert (tmp_path / "a.jsonl").exists()
+
+
+def test_http_sink_failure_is_isolated(tmp_path, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("SIEM unreachable")
+    monkeypatch.setattr(audit_mod, "requests", type("R", (), {"post": staticmethod(boom)}))
+    cfg = AuditConfig(path=str(tmp_path / "a.jsonl"),
+                      http=HttpSinkConfig(enabled=True, url="https://siem"))
+    log = AuditLog(cfg)
+    log.record("scan.started", actor="cli")     # must not raise
+    assert log.tail()[0]["event"] == "scan.started"   # file sink unaffected
+
+
+def test_syslog_sink_smoke(tmp_path):
+    # UDP to a closed local port is fire-and-forget; building + emitting must not raise.
+    cfg = AuditConfig(path="",   # push-only (no file)
+                      syslog=SyslogSinkConfig(enabled=True, address="localhost:59999", protocol="udp"))
+    AuditLog(cfg).record("config.changed", actor="alice")
+
+
+def test_bad_syslog_sink_does_not_break_startup(tmp_path):
+    # An unresolvable/invalid syslog target is logged and skipped, not fatal.
+    cfg = AuditConfig(path=str(tmp_path / "a.jsonl"),
+                      syslog=SyslogSinkConfig(enabled=True, address="tcp-nowhere.invalid:514", protocol="tcp"))
+    log = AuditLog(cfg)                            # must construct despite the bad sink
+    log.record("scan.started", actor="cli")
+    assert (tmp_path / "a.jsonl").exists()         # file sink still works

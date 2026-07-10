@@ -541,15 +541,23 @@ docker compose -f docker-compose.prod.yml up -d --build
 - **Secrets stay in the environment** — the image holds none; provide them via
   `--env-file` / your orchestrator's secret store, never baked into config or the
   image.
-- **Audit log.** Every scan run, config change, and validation-state change is
-  appended (with an **actor + UTC timestamp**) to a JSONL audit file
-  (`audit.enabled`/`audit.path`, default `audit.jsonl` under `/data`) — a durable,
-  append-only decision record for monitoring and after-the-fact auditing, separate
-  from the operational logs. Review it in the UI's **Audit** tab or at
-  `GET /api/audit`. The actor is taken from your SSO / reverse-proxy identity header
-  (`X-Remote-User` / `X-Forwarded-User`) when present, so put codescan behind an
-  authenticating proxy to attribute decisions to real users. Persist `/data` to
-  keep the trail across restarts.
+- **Audit log → SIEM.** Every scan run, config change, and validation-state change
+  is recorded (with an **actor + UTC timestamp**) as an append-only decision trail,
+  separate from the operational logs. It fans out to configurable **sinks**
+  (`audit.*`): the local **JSONL file** (default; review in the UI's **Audit** tab
+  or `GET /api/audit`, and tail-able by any forwarder), plus optional **syslog**
+  (Splunk/QRadar/ArcSight/rsyslog) and **HTTP** (Splunk HEC / Elastic / Datadog /
+  webhook) sinks for direct SIEM ingestion. Push delivery is best-effort — a SIEM
+  outage is logged, never fatal — and the file remains the durable local record.
+  Actor is taken from your SSO / reverse-proxy identity header (`X-Remote-User` /
+  `X-Forwarded-User`) when present, so front codescan with an authenticating proxy
+  to attribute decisions to real users. Persist `/data` to keep the local trail.
+
+  ```yaml
+  audit:
+    http: { enabled: true, url: "https://splunk:8088/services/collector/event",
+            token: ${AUDIT_HTTP_TOKEN}, token_prefix: "Splunk ", event_key: event }
+  ```
 
 **Secrets from HashiCorp Vault (built-in).** codescan can pull secrets straight
 from Vault. Install the extra (`pip install 'codescan[vault]'`) and enable it in
