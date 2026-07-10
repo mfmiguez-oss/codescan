@@ -16,6 +16,8 @@ closures) always prevail on rescan, so triage is not silently overwritten.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from .models import Finding, ValidationState
@@ -60,15 +62,27 @@ class StateStore:
         self._entries[finding.id] = {"state": finding.validation_state, "manual": manual}
 
     def save(self) -> None:
-        if self.path:
-            self.path.write_text(
-                json.dumps(
-                    {k: {"state": v["state"].value, "manual": v["manual"]}
-                     for k, v in self._entries.items()},
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
+        if not self.path:
+            return
+        payload = json.dumps(
+            {k: {"state": v["state"].value, "manual": v["manual"]}
+             for k, v in self._entries.items()},
+            indent=2,
+        )
+        # Atomic write: a crash mid-write must not truncate persisted analyst
+        # decisions. Write a sibling temp file, then os.replace (atomic on the
+        # same filesystem) over the target.
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=self.path.name, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(payload)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, self.path)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
 
 
 def assign_states(findings: list[Finding], store: StateStore) -> None:

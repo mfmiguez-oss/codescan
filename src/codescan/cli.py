@@ -27,7 +27,7 @@ def _print_chain(chain: dict) -> None:
 @app.command()
 def scan(
     config: str = typer.Option("config/config.example.yaml", help="Path to config YAML."),
-    fixtures: str = typer.Option(
+    fixtures: str | None = typer.Option(
         None, help="Directory of scanner exports to run offline instead of live APIs."
     ),
     out: str = typer.Option("servicenow_import.json", help="ServiceNow import output path."),

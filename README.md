@@ -1,5 +1,7 @@
 # codescan
 
+[![CI](https://github.com/mfmiguez-oss/codescan/actions/workflows/ci.yml/badge.svg)](https://github.com/mfmiguez-oss/codescan/actions/workflows/ci.yml)
+
 An enterprise code-scanning pipeline that ingests vulnerability findings from
 **Snyk** and **JFrog Xray** across repositories in a **local Bitbucket**
 (Data Center/Server) install, deduplicates them, uses **Claude** to assess

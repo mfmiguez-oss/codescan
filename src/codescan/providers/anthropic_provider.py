@@ -4,6 +4,7 @@ and Fable refusal fallbacks. The reference implementation of the harness."""
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import anthropic
 
@@ -44,6 +45,7 @@ class AnthropicProvider(LLMProvider):
 
         # Fable/Mythos: security tooling can trip false-positive refusals — opt into
         # server-side fallback so the request is re-served on Opus 4.8 in the same call.
+        msg: Any  # beta vs standard stream return slightly different SDK types
         if req.model.startswith("claude-fable") or req.model.startswith("claude-mythos"):
             kwargs["betas"] = ["server-side-fallback-2026-06-01"]
             kwargs["fallbacks"] = [{"model": "claude-opus-4-8"}]
