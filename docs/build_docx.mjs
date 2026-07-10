@@ -202,6 +202,7 @@ const children = [
     ],
     [2000, 3200, 4160]),
   P("The client omits effort / adaptive thinking for models that don't support them (Haiku) and enables server-side refusal fallbacks for Fable/Mythos (security tooling can trip false-positive classifier refusals; the request transparently re-serves on Opus 4.8). Config ai.tasks.<name> overrides any field per task. Adding a new AI stage is a one-liner."),
+  P("Enterprise / Fable 5. For security triage, capability on the judgement tasks converts to outcomes, so the enterprise profile (config/config.enterprise.yaml) routes exploitability / threat modeling / whitebox review to Fable 5 and keeps mechanical work on Haiku. codescan handles Fable's enterprise behaviors: the refusal fallback above; data residency (ai.inference_geo us/eu, threaded onto Anthropic first-party requests); and Fable's 30-day data-retention requirement — under zero data retention Anthropic 400s Fable, which the provider re-raises with actionable guidance (route to Opus 4.8). Fable also can't use the Batches API, so batch mode keeps Fable tasks synchronous."),
   P("Silent adaptive routing (ai.auto_route, off by default). When enabled, each AI call is nudged up or down an Anthropic capability ladder — Haiku -> Sonnet -> Opus -> Fable — relative to its configured tier, by a difficulty signal the calling stage computes (group_difficulty / size_difficulty): a single low-severity finding downgrades (cheaper), while a KEV / multi-critical / large group upgrades (stronger). It only shifts Anthropic ladder models — custom ids and other suppliers are untouched — and clamps at both ends. Enabling it is the operator's explicit opt-in; thereafter it applies silently per call."),
   P("Fan-out (complete_json_many). The judgement-heavy stages each build one request per repo/service and hand the list to LLMClient.complete_json_many, which owns the fan-out and returns {custom_id: result}. Two strategies: (a) bounded concurrency (ai.max_concurrency, default 4) via resilient_map — up to N at once, per-item failures isolated, deterministic apply order, latency-only (same requests/cost); or (b) Message Batches (ai.batch) — one Anthropic batch at ~50% token cost, asynchronous (the pipeline polls up to batch_max_wait_seconds), for scheduled runs. Fable (refusal fallbacks are rejected on Batches) and non-Anthropic requests fall back to concurrency, as does the whole set if submission errors. Prompt caching is deliberately omitted: the static system prompts sit below the model's minimum cacheable-prefix size and payloads differ."),
   H2("5.6 Composite scoring (scoring.py)"),
@@ -323,6 +324,7 @@ const children = [
     "ServiceNow (tests/test_servicenow.py) — JSON/CSV output and the Table API push path (posts each record; a failing push doesn't abort the export).",
     "State store (tests/test_validation.py) — atomic save round-trip, no temp leftover, crash-during-replace preserves the existing file.",
     "SQL state store (tests/test_state_store_sql.py) — backend factory, round-trip/persistence, manual-not-clobbered-by-machine concurrency guard, feedback over SQL, and a pipeline run persisting to SQLite.",
+    "Enterprise / Fable 5 (tests/test_enterprise.py) — inference_geo threaded onto requests, Fable's data-retention 400 re-raised actionably, and the enterprise config profile routing deep tasks to Fable / mechanical to Haiku.",
     "Vault (tests/test_vault.py) — KV v1/v2 injection, override semantics, auth errors, and the Config.load wiring.",
     "Audit log (tests/test_audit.py) — record/tail JSONL round-trip, disabled no-op, pipeline scan events, web actor-attributed config/state events via GET /api/audit, and the SIEM sinks (HTTP POST incl. HEC event_key, sink-failure isolation, syslog smoke, bad-sink survivability).",
     "Feedback loop (tests/test_feedback.py) — false-positive history lowers / confirmed raises the score, min-evidence gate, self-exclusion, KEV-floor respect, disabled no-op, accuracy-states-only, store attribute round-trip.",
@@ -332,7 +334,7 @@ const children = [
 
   H1("13. Configuration surface"),
   ...bullets([
-    "ai — default tier + per-task routing (tasks.<name>), plus max_concurrency (bounded parallelism) and auto_route (silent adaptive tier selection).",
+    "ai — default tier + per-task routing (tasks.<name>), plus max_concurrency (bounded parallelism), auto_route (silent adaptive tier selection), batch (Message Batches API, ~50% cost), and inference_geo (Anthropic data residency). See config/config.enterprise.yaml for a Fable-5 enterprise profile.",
     "source / bitbucket / github — repo inventory (scan surface), tokens, scoping, TLS.",
     "snyk / xray — findings endpoints, tokens, TLS.",
     "openhack — whitebox review: enabled/findings_dir (ingest), auto/clone/command (run), and built-in-engine tuning (passes, pass_models for per-pass suppliers, max_files, max_file_bytes, min_confidence).",

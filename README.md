@@ -196,6 +196,42 @@ minimum cacheable-prefix size and each request's payload differs, so a cache
 breakpoint would never hit — it's deliberately omitted rather than added as dead
 weight.
 
+## Enterprise deployment with Claude Fable 5
+
+For security triage, model capability on the **judgement** tasks — exploitability,
+attack chaining, threat modeling, whitebox review — converts directly into
+outcomes: fewer false positives to work and fewer real, multi-step attacks missed.
+So the enterprise profile routes those to **Claude Fable 5** (Anthropic's most
+capable model), keeps mechanical work (dedup, enrichment) on cheap Haiku, and wires
+HA storage, SIEM audit, and data residency. A ready profile ships at
+[`config/config.enterprise.yaml`](config/config.enterprise.yaml):
+
+```yaml
+ai:
+  inference_geo: eu            # data residency (Anthropic 1P): pin inference to a region
+  tasks:
+    dedup:          { model: claude-haiku-4-5 }              # mechanical -> cheap
+    exploitability: { model: claude-fable-5, effort: xhigh } # deepest chaining
+    threat_model:   { model: claude-fable-5, effort: xhigh }
+    openhack:       { model: claude-fable-5, effort: xhigh } # deepest whitebox review
+```
+
+codescan already handles Fable's enterprise-specific behaviors:
+
+- **Refusal classifiers.** Security content (exploit narratives, vuln descriptions)
+  can trip Fable's false-positive refusal classifier — a real risk for a scanner.
+  The Anthropic provider opts into **server-side fallback to Opus 4.8** in the same
+  call, so a false-positive refusal is transparently re-served rather than failing.
+- **Data retention.** Fable 5 requires **30-day retention** and is rejected (400)
+  under **zero data retention**. If your org runs ZDR, route the Fable tasks to
+  `claude-opus-4-8` instead — codescan surfaces the 400 with exactly that guidance.
+- **Data residency.** `ai.inference_geo` (`us`/`eu`) pins Anthropic inference to a
+  region for compliance.
+- **Batches.** The ~50% Batches API rejects Fable's fallbacks, so `ai.batch` keeps
+  Fable-routed tasks on the synchronous path (they don't take the batch discount).
+- **HA & audit.** The profile turns on the shared **SQL state store** and ships the
+  **audit log to a SIEM** — see [Deployment & operations](#deployment--operations).
+
 ## Threat modeling
 
 Per-service **STRIDE threat model** (`threatmodel.py`, deep tier). Where

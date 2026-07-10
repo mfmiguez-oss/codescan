@@ -308,6 +308,17 @@ re-serves on Opus 4.8 in the same call). Config `ai.tasks.<name>` overrides any
 field per task. Adding a new AI stage is a one-liner: name a task, optionally
 give it a built-in tier.
 
+**Enterprise / Fable 5.** For security triage, capability on the judgement tasks
+(exploitability, chaining, threat modeling, whitebox review) converts to outcomes,
+so the enterprise profile (`config/config.enterprise.yaml`) routes those to Fable 5
+and keeps mechanical work on Haiku. codescan handles Fable's enterprise behaviors:
+the refusal fallback above; **data residency** (`ai.inference_geo`, e.g. `us`/`eu`,
+threaded onto Anthropic first-party requests); and Fable's **30-day data-retention
+requirement** — under zero data retention Anthropic rejects Fable with a 400, which
+the provider re-raises with actionable guidance (route to Opus 4.8). Fable also
+can't use the Batches API (its fallbacks are rejected), so batch mode keeps Fable
+tasks synchronous.
+
 **Silent adaptive routing (`ai.auto_route`).** Off by default. When enabled, each
 AI call is nudged up or down an Anthropic capability ladder —
 **Haiku → Sonnet → Opus → Fable** — *relative to* its configured tier, by a
@@ -705,6 +716,9 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
 - **SQL state store** (`tests/test_state_store_sql.py`) — backend factory,
   round-trip/persistence, the manual-not-clobbered-by-machine concurrency guard,
   feedback over the SQL store, and a pipeline run persisting to SQLite.
+- **Enterprise / Fable 5** (`tests/test_enterprise.py`) — `inference_geo` threaded
+  onto requests, Fable's data-retention 400 re-raised actionably, and the
+  enterprise config profile routing deep tasks to Fable / mechanical to Haiku.
 - **Web API** (`tests/test_web.py`) — FastAPI TestClient over state, scan,
   state-change (persistent-across-rescan), validation, ServiceNow, and the
   **API-token guard** (401 without, accepted via header/cookie, healthz open).
@@ -722,8 +736,9 @@ builds the image on every push/PR; `mypy` is a clean gate and the package ships
 `config/config.example.yaml` (secrets via `${ENV}`):
 
 - `ai` — default tier + per-task routing (`tasks.<name>`), plus `max_concurrency`
-  (bounded parallelism), `auto_route` (silent adaptive tier selection), and `batch`
-  (Message Batches API, ~50% cost, async).
+  (bounded parallelism), `auto_route` (silent adaptive tier selection), `batch`
+  (Message Batches API, ~50% cost, async), and `inference_geo` (Anthropic data
+  residency). See `config/config.enterprise.yaml` for a Fable-5 enterprise profile.
 - `source` / `bitbucket` / `github` — repo inventory (scan surface), tokens, scoping, TLS.
 - `snyk` / `xray` — findings endpoints, tokens, TLS.
 - `openhack` — whitebox review: `enabled`/`findings_dir` (ingest), `auto`/`clone`/

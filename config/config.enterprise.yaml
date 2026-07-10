@@ -1,0 +1,110 @@
+# codescan — enterprise profile tuned for Claude Fable 5.
+#
+# Rationale: in security triage, model capability on the *judgement* tasks
+# (exploitability, attack chaining, threat modeling, whitebox review) translates
+# directly into outcomes — fewer false positives to triage and fewer real,
+# multi-step attacks missed. So the deep tasks route to Fable 5 (Anthropic's most
+# capable model) while mechanical work stays on cheap Haiku. HA storage, SIEM
+# audit shipping, and data residency are wired for an enterprise deployment.
+#
+# Fable 5 caveats this profile accounts for:
+#   * Refusal classifiers — security content can trip false-positive refusals; the
+#     Anthropic provider opts into server-side fallback to Opus 4.8 automatically.
+#   * Data retention — Fable 5 requires 30-day retention and 400s under zero data
+#     retention (ZDR). If your org is ZDR, switch the fable-routed tasks below to
+#     claude-opus-4-8. codescan surfaces the 400 with this guidance.
+#   * Batches — the ~50% Batches API rejects Fable's fallbacks, so `ai.batch` keeps
+#     Fable tasks on the synchronous path (they don't get the batch discount).
+#   * Cost — Fable is above Opus-tier; this trades cost for accuracy on the tasks
+#     where it matters. Dedup/enrichment stay on Haiku.
+
+ai:
+  provider: anthropic
+  model: claude-opus-4-8        # default tier for any unrouted task
+  effort: high
+  max_tokens: 32000
+  max_concurrency: 8           # larger estates: more per-service calls in flight
+  auto_route: false            # deterministic tiers — auditable routing for enterprise
+  batch: false                 # interactive triage; Fable can't use Batches anyway
+  # Data residency (Anthropic first-party). Set to your region for compliance.
+  inference_geo: ""            # e.g. "us" or "eu"
+  tasks:
+    dedup:          { model: claude-haiku-4-5, max_tokens: 8000 }   # mechanical -> cheap
+    enrichment:     { model: claude-haiku-4-5 }                     # mechanical -> cheap
+    exploitability: { model: claude-fable-5, effort: xhigh }        # deepest chaining
+    threat_model:   { model: claude-fable-5, effort: xhigh }        # deepest STRIDE
+    openhack:       { model: claude-fable-5, effort: xhigh }        # deepest whitebox review
+
+source:
+  provider: github
+github:
+  api_url: ${GITHUB_API_URL}
+  token: ${GITHUB_TOKEN}
+  repos: []
+  orgs: []
+  verify_tls: true
+snyk:
+  api_url: ${SNYK_API_URL}
+  token: ${SNYK_TOKEN}
+  org_id: ${SNYK_ORG_ID}
+xray:
+  base_url: ${XRAY_BASE_URL}
+  token: ${XRAY_TOKEN}
+
+openhack:
+  auto: true                   # whitebox-review repos the SCA scanners miss
+  clone: true
+  workspace: .openhack
+  passes: 2                    # union for recall + cross-pass agreement
+  # For maximum independence, run the passes on different suppliers (Fable primary):
+  pass_models:
+    - { provider: anthropic, model: claude-fable-5 }
+    - { provider: anthropic, model: claude-opus-4-8 }
+  min_confidence: low
+
+threat_model:
+  enabled: true
+
+feedback:
+  enabled: true                # learn from analyst confirm/false-positive decisions
+  max_adjust: 15
+  min_evidence: 2
+
+# Shared, HA-ready state store — multiple replicas / scheduled runners share one
+# durable, concurrency-safe database. Needs `pip install 'codescan[sql]'` (+ driver).
+storage:
+  backend: sql
+  dsn: ${STATE_DB_DSN}         # e.g. postgresql+psycopg://user:pass@db:5432/codescan
+
+# Audit trail shipped to the SIEM (the file stays the durable local record).
+audit:
+  enabled: true
+  path: audit.jsonl
+  http:
+    enabled: true
+    url: ${AUDIT_HTTP_URL}     # e.g. https://splunk:8088/services/collector/event
+    token: ${AUDIT_HTTP_TOKEN}
+    token_prefix: "Splunk "
+    event_key: event
+
+servicenow:
+  instance: ${SERVICENOW_INSTANCE}
+  user: ${SERVICENOW_USER}
+  password: ${SERVICENOW_PASSWORD}
+  push: true                   # write findings straight into ServiceNow VR
+  import_table: sn_vul_vulnerable_item
+  format: json
+
+enrichment:
+  kev_enabled: true
+  epss_enabled: true
+  reachability_enabled: true
+  ai_enabled: false
+
+scoring:
+  weights:
+    severity: 0.30
+    exploitability: 0.35
+    exposure: 0.20
+    chaining: 0.15
+  kev_floor: 85

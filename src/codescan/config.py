@@ -47,6 +47,10 @@ class AIConfig(_StrictModel):
     model: str = "claude-opus-4-8"
     effort: str = "high"
     max_tokens: int = 32000
+    # Data residency for Anthropic first-party requests, e.g. "us" or "eu" — pins
+    # inference to that region (enterprise compliance). Empty = provider default.
+    # Applies to the Anthropic supplier only; ignored by OpenAI/Google.
+    inference_geo: str = ""
     # Per-service AI calls (exploitability, threat modeling, enrichment, dedup) are
     # independent — run up to this many concurrently to cut wall-clock time on large
     # scans. Latency-only (same requests, same cost); 1 = sequential. Bounded to

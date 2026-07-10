@@ -26,6 +26,7 @@ class CompletionRequest:
     schema: dict
     effort: str = "high"
     max_tokens: int = 16000
+    inference_geo: str = ""        # data residency (Anthropic first-party), e.g. "us" / "eu"
 
 
 class LLMProvider:

@@ -48,6 +48,8 @@ class AnthropicProvider(LLMProvider):
         )
         if _has(req.model, _ADAPTIVE_MODELS):
             params["thinking"] = {"type": "adaptive"}
+        if req.inference_geo:
+            params["inference_geo"] = req.inference_geo   # data residency (1P Anthropic)
         return params
 
     def complete_json(self, req: CompletionRequest) -> dict:
@@ -59,8 +61,19 @@ class AnthropicProvider(LLMProvider):
         if req.model.startswith("claude-fable") or req.model.startswith("claude-mythos"):
             kwargs["betas"] = ["server-side-fallback-2026-06-01"]
             kwargs["fallbacks"] = [{"model": "claude-opus-4-8"}]
-            with self.client.beta.messages.stream(**kwargs) as stream:
-                msg = stream.get_final_message()
+            try:
+                with self.client.beta.messages.stream(**kwargs) as stream:
+                    msg = stream.get_final_message()
+            except anthropic.BadRequestError as exc:
+                # Enterprise gotcha: Fable 5 requires 30-day data retention and is
+                # rejected (400) under zero data retention. Surface it actionably
+                # instead of an opaque error mid-scan.
+                raise RuntimeError(
+                    f"Anthropic rejected the {req.model} request (400): {exc}. Note: "
+                    "Fable 5 requires 30-day data retention and is unavailable under "
+                    "zero data retention — if your org is ZDR, route this task to "
+                    "claude-opus-4-8 (ai.tasks.<task>.model) or claude-sonnet-5."
+                ) from exc
         else:
             with self.client.messages.stream(**kwargs) as stream:
                 msg = stream.get_final_message()

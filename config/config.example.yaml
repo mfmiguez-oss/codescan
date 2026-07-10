@@ -11,6 +11,10 @@ ai:
   model: claude-opus-4-8
   effort: high            # low | medium | high | xhigh | max (Anthropic; ignored elsewhere)
   max_tokens: 32000
+  # Data residency for Anthropic first-party requests (enterprise compliance):
+  # "us" / "eu" pins inference to that region. Empty = provider default. Anthropic
+  # supplier only. See config/config.enterprise.yaml for a Fable-5 enterprise profile.
+  inference_geo: ""
   # Per-service AI calls (exploitability, threat modeling, enrichment, dedup,
   # OpenHack) run independently — this many at once. Cuts wall-clock time on large
   # multi-repo scans; latency-only (same requests/cost). 1 = sequential.

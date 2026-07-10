@@ -134,6 +134,7 @@ class LLMClient:
         req = CompletionRequest(
             model=spec.model, system=system, user=user, schema=schema,
             effort=spec.effort, max_tokens=spec.max_tokens,
+            inference_geo=self.router.cfg.inference_geo,
         )
         return provider.complete_json(req)
 
@@ -183,7 +184,8 @@ class LLMClient:
             reqs = [
                 (f"b{i}", CompletionRequest(
                     model=spec.model, system=it.system, user=it.user, schema=schema,
-                    effort=spec.effort, max_tokens=spec.max_tokens))
+                    effort=spec.effort, max_tokens=spec.max_tokens,
+                    inference_geo=self.router.cfg.inference_geo))
                 for i, (it, spec) in enumerate(batch)
             ]
             try:
