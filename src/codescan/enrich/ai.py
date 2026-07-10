@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 
-from ..concurrency import map_workers, workers_of
+from ..concurrency import resilient_map, workers_of
 from ..llm import LLMClient
 from ..models import Finding, finding_component_label, group_difficulty, group_findings_by_repo
 from .base import BaseEnricher
@@ -71,11 +71,13 @@ class AIEnricher(BaseEnricher):
     def enrich(self, findings: list[Finding]) -> None:
         by_repo = group_findings_by_repo(findings)
         by_id = {f.id: f for f in findings}
-        # Query per-repo groups concurrently, then apply in order.
-        results = map_workers(
+        # Query per-repo groups concurrently, then apply in order; a failing repo
+        # is logged and skipped (enrichment is best-effort, not load-bearing).
+        results, _ = resilient_map(
             lambda item: self._ask(item[0], item[1]),
             list(by_repo.items()),
             workers_of(self.llm),
+            describe=lambda item: item[0],
         )
         for result in results:
             self._apply(result, by_id)

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+
 import requests
 
 from ..config import EnrichmentConfig
 from ..models import Finding
 from .base import BaseEnricher
+
+logger = logging.getLogger(__name__)
 
 
 class EpssEnricher(BaseEnricher):
@@ -32,6 +36,7 @@ class EpssEnricher(BaseEnricher):
                 ).json()
                 for row in resp.get("data", []):
                     out[row["cve"]] = float(row["epss"])
-            except Exception:
+            except Exception as exc:  # noqa: BLE001 - degrade, don't fail the run
+                logger.warning("EPSS lookup failed for a %d-CVE batch (%s)", len(chunk), exc)
                 continue
         return out

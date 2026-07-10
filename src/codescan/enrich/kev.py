@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+
 import requests
 
 from ..config import EnrichmentConfig
 from ..models import Finding
 from .base import BaseEnricher
+
+logger = logging.getLogger(__name__)
 
 
 class KevEnricher(BaseEnricher):
@@ -24,5 +28,6 @@ class KevEnricher(BaseEnricher):
         try:
             data = requests.get(self.cfg.kev_url, timeout=30).json()
             return {v["cveID"] for v in data.get("vulnerabilities", [])}
-        except Exception:  # feed unavailable -> empty, don't fail the run
+        except Exception as exc:  # noqa: BLE001 - degrade, don't fail the run
+            logger.warning("KEV feed unavailable (%s); findings lose the KEV signal", exc)
             return set()

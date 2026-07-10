@@ -9,10 +9,13 @@ modeling on Google — all set in config.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, replace
 
 from .config import AIConfig
 from .providers import CompletionRequest, get_provider
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -97,6 +100,8 @@ class LLMClient:
         self, task: str, system: str, user: str, schema: dict, *, difficulty: str | None = None
     ) -> dict:
         spec = self.router.resolve(task, difficulty)
+        logger.debug("task=%s -> %s/%s (effort=%s, difficulty=%s)",
+                     task, spec.provider, spec.model, spec.effort, difficulty or "-")
         provider = get_provider(spec.provider)
         req = CompletionRequest(
             model=spec.model, system=system, user=user, schema=schema,

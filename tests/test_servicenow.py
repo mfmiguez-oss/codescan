@@ -40,3 +40,43 @@ def test_csv_output(tmp_path):
     assert len(rows) == len(items) == 1
     assert rows[0]["vulnerability"] == "CVE-2021-44228"
     assert "line one" in rows[0]["description"]
+
+
+class _FakeHttp:
+    """Records posts; no network. Mirrors HttpClient's surface used by _push."""
+
+    def __init__(self, *a, **k):
+        self.session = type("S", (), {"auth": None, "headers": {}})()
+        self.posts: list[tuple[str, dict]] = []
+
+    def post(self, path, json=None, **kw):
+        self.posts.append((path, json))
+
+
+def test_push_posts_each_record(tmp_path, monkeypatch):
+    fake = _FakeHttp()
+    monkeypatch.setattr("codescan.servicenow.HttpClient", lambda *a, **k: fake)
+
+    cfg = ServiceNowConfig(push=True, instance="https://acme.service-now.com",
+                           user="svc", password="pw", import_table="sn_vul_vulnerable_item")
+    items = ServiceNowExporter(cfg).export([_finding()], [], tmp_path / "out.json")
+
+    # The push path actually runs (regression: _push was dead code) and targets
+    # the configured Table API import table with the built record.
+    assert len(fake.posts) == len(items) == 1
+    path, body = fake.posts[0]
+    assert path == "/api/now/table/sn_vul_vulnerable_item"
+    assert body["correlation_id"] == items[0]["correlation_id"]
+    assert fake.session.auth == ("svc", "pw")
+
+
+def test_push_isolates_record_failures(tmp_path, monkeypatch):
+    class Boom(_FakeHttp):
+        def post(self, path, json=None, **kw):
+            raise RuntimeError("500 boom")
+
+    monkeypatch.setattr("codescan.servicenow.HttpClient", lambda *a, **k: Boom())
+    cfg = ServiceNowConfig(push=True, user="u", password="p")
+    # A failing push must not raise — the on-disk export still succeeds.
+    ServiceNowExporter(cfg).export([_finding()], [], tmp_path / "out.json")
+    assert (tmp_path / "out.json").exists()

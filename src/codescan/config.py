@@ -8,9 +8,16 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 _ENV_PATTERN = re.compile(r"\$\{([^}]+)\}")
+
+
+class _StrictModel(BaseModel):
+    """Config base: reject unknown keys so a misspelled setting fails loudly
+    (`ai.max_concurency`, `servicnow`, …) instead of being silently ignored."""
+
+    model_config = ConfigDict(extra="forbid")
 
 
 def _interpolate(value: Any) -> Any:
@@ -25,7 +32,7 @@ def _interpolate(value: Any) -> Any:
     return value
 
 
-class TaskModel(BaseModel):
+class TaskModel(_StrictModel):
     """Per-task override of the default AI tier. Unset fields inherit."""
 
     provider: str | None = None      # anthropic | openai | google
@@ -34,7 +41,7 @@ class TaskModel(BaseModel):
     max_tokens: int | None = None
 
 
-class AIConfig(BaseModel):
+class AIConfig(_StrictModel):
     # Default tier — used by any task without a more specific override.
     provider: str = "anthropic"      # anthropic | openai | google (per-supplier harness)
     model: str = "claude-opus-4-8"
@@ -58,14 +65,14 @@ class AIConfig(BaseModel):
     tasks: dict[str, TaskModel] = {}
 
 
-class BitbucketConfig(BaseModel):
+class BitbucketConfig(_StrictModel):
     base_url: str = ""
     token: str = ""
     projects: list[str] = []
     verify_tls: bool = True
 
 
-class GitHubConfig(BaseModel):
+class GitHubConfig(_StrictModel):
     api_url: str = "https://api.github.com"   # or GHES: https://ghe.internal/api/v3
     token: str = ""
     # Target scope, most specific first:
@@ -81,26 +88,26 @@ class GitHubConfig(BaseModel):
         return v.strip() or "https://api.github.com"
 
 
-class SourceConfig(BaseModel):
+class SourceConfig(_StrictModel):
     """Which SCM provides the repo inventory (scan surface)."""
 
     provider: str = "bitbucket"               # bitbucket | github
 
 
-class SnykConfig(BaseModel):
+class SnykConfig(_StrictModel):
     api_url: str = ""
     token: str = ""
     org_id: str = ""
     verify_tls: bool = True
 
 
-class XrayConfig(BaseModel):
+class XrayConfig(_StrictModel):
     base_url: str = ""
     token: str = ""
     verify_tls: bool = True
 
 
-class OpenHackConfig(BaseModel):
+class OpenHackConfig(_StrictModel):
     """OpenHack whitebox source review — codescan's built-in engine (default), an
     external OpenHack `command`, or ingesting an existing run's findings dir."""
 
@@ -129,7 +136,7 @@ class OpenHackConfig(BaseModel):
     include_ext: list[str] = [] # source extensions to review; empty = built-in set
 
 
-class ServiceNowConfig(BaseModel):
+class ServiceNowConfig(_StrictModel):
     instance: str = ""
     user: str = ""
     password: str = ""
@@ -138,7 +145,7 @@ class ServiceNowConfig(BaseModel):
     format: str = "json"                # json | csv (Import Set / CSV transform)
 
 
-class EnrichmentConfig(BaseModel):
+class EnrichmentConfig(_StrictModel):
     kev_url: str = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
     epss_url: str = "https://api.first.org/data/v1/epss"
     # Toggle enrichers individually. Order is fixed (kev, epss, reachability, ai);
@@ -149,14 +156,14 @@ class EnrichmentConfig(BaseModel):
     ai_enabled: bool = False        # LLM remediation + tags (task "enrichment")
 
 
-class ThreatModelConfig(BaseModel):
+class ThreatModelConfig(_StrictModel):
     # On by default (only runs when the AI stages are enabled). It's an extra
     # deep-tier call per service — set false to skip it, or route the
     # "threat_model" task in ai.tasks to a cheaper tier.
     enabled: bool = True
 
 
-class VaultConfig(BaseModel):
+class VaultConfig(_StrictModel):
     """Optional HashiCorp Vault secret source (see `vault.py`). When enabled, KV
     secrets are pulled into the environment before config interpolation, so the
     rest of the config resolves from Vault via the same `${ENV}` seam."""
@@ -175,7 +182,7 @@ class VaultConfig(BaseModel):
     verify_tls: bool = True
 
 
-class ScoringConfig(BaseModel):
+class ScoringConfig(_StrictModel):
     weights: dict[str, float] = {
         "severity": 0.30,
         "exploitability": 0.35,
@@ -185,7 +192,7 @@ class ScoringConfig(BaseModel):
     kev_floor: float = 85.0
 
 
-class Config(BaseModel):
+class Config(_StrictModel):
     ai: AIConfig = AIConfig()
     source: SourceConfig = SourceConfig()
     bitbucket: BitbucketConfig = BitbucketConfig()

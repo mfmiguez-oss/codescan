@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 
-from .concurrency import map_workers, workers_of
+from .concurrency import resilient_map, workers_of
 from .llm import LLMClient
 from .models import Asset, EntryPoint, Finding, Severity, Stride, Threat, ThreatModel, finding_component_label, group_difficulty, group_findings_by_repo
 
@@ -129,8 +129,12 @@ class ThreatModelEngine:
             return self._build_one(repo, group, repo_chains)
 
         # One deep-tier call per service; independent, so run them concurrently
-        # (order preserved for a stable threat_models.json).
-        return map_workers(build_repo, list(by_repo.items()), workers_of(self.llm))
+        # (order preserved). A failing service is logged and skipped, not fatal.
+        models, _ = resilient_map(
+            build_repo, list(by_repo.items()), workers_of(self.llm),
+            describe=lambda item: item[0],
+        )
+        return models
 
     def _build_one(self, repo: str, group: list[Finding], chains: list[dict]) -> ThreatModel:
         payload = {

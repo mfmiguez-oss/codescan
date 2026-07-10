@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 
 class HttpClient:
@@ -52,7 +55,10 @@ class HttpClient:
                 if resp.status_code in (429, 500, 502, 503, 504):
                     # Transient — back off and retry.
                     last_exc = RuntimeError(f"{resp.status_code} {resp.reason}")
-                    time.sleep(min(float(resp.headers.get("Retry-After", 2**attempt)), 30))
+                    delay = min(float(resp.headers.get("Retry-After", 2**attempt)), 30)
+                    logger.warning("%s %s -> %s; retry %d/%d in %.0fs",
+                                   method, url, resp.status_code, attempt + 1, self.max_retries, delay)
+                    time.sleep(delay)
                     continue
                 if resp.status_code >= 400:
                     # Client error (401/403/404/…) — not retryable. Fail fast with
@@ -65,5 +71,7 @@ class HttpClient:
                 return resp
             except requests.RequestException as exc:  # network-level failure
                 last_exc = exc
+                logger.warning("%s %s network error: %s; retry %d/%d",
+                               method, url, exc, attempt + 1, self.max_retries)
                 time.sleep(2**attempt)
         raise RuntimeError(f"{method} {url} failed after {self.max_retries} attempts ({last_exc})")

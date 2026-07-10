@@ -15,11 +15,14 @@ from __future__ import annotations
 import csv
 import io
 import json
+import logging
 from pathlib import Path
 
 from .config import ServiceNowConfig
 from .connectors.base import HttpClient
 from .models import SERVICENOW_STATE, Finding
+
+logger = logging.getLogger(__name__)
 
 
 def _risk_rating(score: float) -> str:
@@ -122,6 +125,31 @@ class ServiceNowExporter:
     def _write_csv(items: list[dict], path: Path) -> None:
         path.write_text(items_to_csv(items), encoding="utf-8")
 
+    def _push(self, items: list[dict]) -> tuple[int, int]:
+        """POST each record into the configured import table (Table API).
+
+        Idempotent on `correlation_id`, so a failed record is safe to retry on the
+        next run — we isolate per-record failures (log and continue) rather than
+        aborting the whole push, and return `(ok, failed)` counts.
+        """
+        http = HttpClient(self.cfg.instance, token="")
+        http.session.auth = (self.cfg.user, self.cfg.password)
+        http.session.headers["Content-Type"] = "application/json"
+        ok = failed = 0
+        for item in items:
+            try:
+                http.post(f"/api/now/table/{self.cfg.import_table}", json=item)
+                ok += 1
+            except Exception as exc:  # noqa: BLE001 - isolate one bad record
+                failed += 1
+                logger.warning(
+                    "ServiceNow push failed for %s: %s", item.get("correlation_id"), exc
+                )
+        (logger.error if failed else logger.info)(
+            "ServiceNow push: %d ok, %d failed -> %s", ok, failed, self.cfg.import_table
+        )
+        return ok, failed
+
 
 def items_to_csv(items: list[dict]) -> str:
     """Render vulnerable-item records as CSV (multi-line work notes are quoted)."""
@@ -135,11 +163,3 @@ def items_to_csv(items: list[dict]) -> str:
     for item in items:
         writer.writerow({k: ("" if v is None else v) for k, v in item.items()})
     return buf.getvalue()
-
-    def _push(self, items: list[dict]) -> None:
-        """POST each record into the configured import table (Table API)."""
-        http = HttpClient(self.cfg.instance, token="")
-        http.session.auth = (self.cfg.user, self.cfg.password)
-        http.session.headers["Content-Type"] = "application/json"
-        for item in items:
-            http.post(f"/api/now/table/{self.cfg.import_table}", json=item)

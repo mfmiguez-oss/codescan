@@ -10,6 +10,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .config import Config
+from .logging_setup import configure
 from .pipeline import Pipeline
 
 app = typer.Typer(add_completion=False, help="Enterprise code-scanning pipeline.")
@@ -45,6 +46,7 @@ def scan(
     ),
 ) -> None:
     """Run the full pipeline and write a ServiceNow VR import file."""
+    configure()
     cfg = Config.load(config)
     if sn_format:
         cfg.servicenow.format = sn_format
@@ -87,6 +89,7 @@ def serve(
     live: bool = typer.Option(False, "--live", help="Scan live systems instead of fixtures."),
 ) -> None:
     """Launch the web UI (analyst triage dashboard)."""
+    configure()
     import uvicorn
 
     from .web import create_app

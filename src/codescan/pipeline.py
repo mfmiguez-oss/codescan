@@ -14,6 +14,10 @@ produces scored, ServiceNow-ready output when no Anthropic key is available.
 from __future__ import annotations
 
 import json
+import logging
+import time
+import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -32,6 +36,16 @@ from .scoring import Scorer
 from .servicenow import ServiceNowExporter
 from .threatmodel import ThreatModelEngine, apply_threat_influence
 from .validation import StateStore, assign_states
+
+logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _stage(run_id: str, name: str):
+    """Time a pipeline stage and log its duration at INFO."""
+    t0 = time.perf_counter()
+    yield
+    logger.info("scan %s: %s done in %.2fs", run_id, name, time.perf_counter() - t0)
 
 
 @dataclass
@@ -129,36 +143,50 @@ class Pipeline:
         out_path: str | Path = "servicenow_import.json",
         state_path: str | Path | None = "validation_state.json",
     ) -> PipelineResult:
+        run_id = uuid.uuid4().hex[:8]
+        t0 = time.perf_counter()
+        mode = "fixtures" if fixtures else "live"
+        logger.info("scan %s start: mode=%s ai=%s offline=%s",
+                    run_id, mode, self.use_ai, self.offline)
+
         # Build one shared LLM client + task router for every AI stage — up front,
         # so live ingest can hand it to the built-in OpenHack review engine.
         llm = LLMClient(ModelRouter(self.cfg.ai)) if self.use_ai else None
 
-        if fixtures:
-            repos, raw = self._ingest_fixtures(Path(fixtures))
-        else:
-            repos, raw = self._ingest_live(llm)
+        with _stage(run_id, "ingest"):
+            if fixtures:
+                repos, raw = self._ingest_fixtures(Path(fixtures))
+            else:
+                repos, raw = self._ingest_live(llm)
+        logger.info("scan %s: ingested %d repos, %d raw findings", run_id, len(repos), len(raw))
 
-        findings = deduplicate(raw)                     # deterministic (free)
-        if llm:
-            findings = SemanticDeduper(llm).refine(findings)  # lower-cost tier (Haiku)
+        with _stage(run_id, "dedup"):
+            findings = deduplicate(raw)                     # deterministic (free)
+            if llm:
+                findings = SemanticDeduper(llm).refine(findings)  # lower-cost tier (Haiku)
+        logger.info("scan %s: %d findings after dedup", run_id, len(findings))
 
-        enrichers = build_enrichers(self.cfg.enrichment, llm=llm, offline=self.offline)
-        run_enrichment(findings, enrichers)
+        with _stage(run_id, "enrich"):
+            enrichers = build_enrichers(self.cfg.enrichment, llm=llm, offline=self.offline)
+            run_enrichment(findings, enrichers)
 
         chains: list[dict] = []
         if llm:
-            chains = ExploitabilityEngine(llm).assess(findings)  # deep tier
+            with _stage(run_id, "exploitability"):
+                chains = ExploitabilityEngine(llm).assess(findings)  # deep tier
+            logger.info("scan %s: %d attack chains", run_id, len(chains))
 
         # Threat modeling runs before scoring so it can feed back in: it enriches
         # each cited finding's exploitability, which the scorer then reflects.
         threat_models: list[ThreatModel] = []
         if llm and self.cfg.threat_model.enabled:
-            threat_models = ThreatModelEngine(llm).build(findings, chains)  # deep tier
-            apply_threat_influence(findings, threat_models)
-            Path(out_path).with_name("threat_models.json").write_text(
-                json.dumps([tm.model_dump() for tm in threat_models], indent=2),
-                encoding="utf-8",
-            )
+            with _stage(run_id, "threat_model"):
+                threat_models = ThreatModelEngine(llm).build(findings, chains)  # deep tier
+                apply_threat_influence(findings, threat_models)
+                Path(out_path).with_name("threat_models.json").write_text(
+                    json.dumps([tm.model_dump() for tm in threat_models], indent=2),
+                    encoding="utf-8",
+                )
 
         Scorer(self.cfg.scoring).score(findings, chains)
 
@@ -169,5 +197,11 @@ class Pipeline:
         exporter = ServiceNowExporter(self.cfg.servicenow)
         items = exporter.export(findings, chains, out_path)
 
+        logger.info(
+            "scan %s done in %.2fs: %d findings, %d chains, %d threat models, "
+            "%d KEV, %d exported",
+            run_id, time.perf_counter() - t0, len(findings), len(chains),
+            len(threat_models), sum(1 for f in findings if f.exploitability.in_kev), len(items),
+        )
         return PipelineResult(repos=repos, findings=findings, chains=chains,
                               threat_models=threat_models, servicenow_items=items)

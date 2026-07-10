@@ -22,6 +22,7 @@ from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
 from .config import Config, TaskModel
+from .logging_setup import configure
 from .models import SERVICENOW_STATE, Finding, ValidationState
 from .pipeline import Pipeline, PipelineResult
 from .providers import PROVIDERS
@@ -381,6 +382,7 @@ def create_app(
     state_path: str = "validation_state.json",
     overrides_path: str = "config.overrides.json",
 ) -> FastAPI:
+    configure()   # idempotent — ensure logs reach a handler when embedded
     state = AppState(config_path, fixtures, live, use_ai, offline, out_path, state_path, overrides_path)
     app = FastAPI(title="codescan", version="0.1.0")
 

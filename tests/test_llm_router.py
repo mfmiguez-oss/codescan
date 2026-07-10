@@ -2,8 +2,19 @@
 
 from __future__ import annotations
 
-from codescan.config import AIConfig, TaskModel
+import pytest
+from pydantic import ValidationError
+
+from codescan.config import AIConfig, Config, TaskModel
 from codescan.llm import ModelRouter, auto_route, ModelSpec
+
+
+def test_unknown_config_key_is_rejected():
+    # A typo'd setting must fail loudly, not be silently ignored.
+    with pytest.raises(ValidationError):
+        AIConfig(max_concurency=8)          # note the typo
+    with pytest.raises(ValidationError):
+        Config.model_validate({"servicnow": {"push": True}})   # typo'd section
 
 
 def test_dedup_defaults_to_haiku():
