@@ -292,6 +292,28 @@ It's deliberately conservative and **explainable**:
 
 On by default; toggle in the Config tab (`feedback.enabled`).
 
+### Score calibration — is the scoring actually right?
+
+Every decision the store persists also freezes a **snapshot of what the machine
+believed at that moment** (risk score, AI exploitability score, EPSS, KEV,
+reachability, severity, repo — `validation.py`). Grading those predictions
+against the analysts' outcomes answers the question no amount of modelling can:
+*do our scores predict what analysts confirm?* The report (`calibration.py`)
+shows:
+
+- **Confirm rate by predicted-score bucket** (0–39 / 40–59 / 60–79 / 80–100) — a
+  well-calibrated pipeline shows a rate that **rises with the bucket**; a flat or
+  inverted curve means the scoring weights (or the AI stage) need attention.
+- **Score separation** — mean predicted score of confirmed vs false-positive
+  decisions; a bigger gap means the score carries real signal.
+- **Noisiest weakness families / components** — the CWEs and packages analysts
+  mostly dismiss: what's wasting triage time (and what the feedback prior is
+  already nudging down).
+
+View it in the UI's **Calibration** tab (`GET /api/calibration`) or run
+`codescan calibration`. It also makes model/provider changes measurable: change
+`ai.model` (or a task route), let triage accumulate, and compare.
+
 ## Install
 
 ```bash
@@ -333,6 +355,11 @@ rescan never overturns an analyst's call.
 A **Threats** tab shows the per-service **STRIDE threat models** (see below):
 threats linked to their findings and chains, assets, entry points, trust
 boundaries, posture, and recommendations.
+
+A **Calibration** tab grades past risk scores against analysts' manual
+confirm / false-positive decisions: confirm rate by predicted-score bucket,
+score separation, and the noisiest weakness families (see
+[Score calibration](#score-calibration--is-the-scoring-actually-right)).
 
 A **Config** tab manages non-secret settings live: the **repo source**
 (Bitbucket/GitHub) and **GitHub repo/org targets**, the default AI tier, per-task

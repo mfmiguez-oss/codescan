@@ -50,6 +50,32 @@ def test_roundtrip_and_persistence(tmp_path):
     reloaded = SqlStateStore(dsn).entry("f1")            # a fresh connection sees it
     assert reloaded["state"] == ValidationState.confirmed and reloaded["manual"] is True
     assert reloaded["cwes"] == ["CWE-79"] and reloaded["component"] == "lodash"
+    # The machine-belief snapshot rides along for the calibration report.
+    assert reloaded["snapshot"]["risk_score"] == 50.0
+    assert reloaded["snapshot"]["repo"] == "a/b"
+    assert reloaded["decided_at"]
+
+
+def test_pre_snapshot_schema_upgrades_in_place(tmp_path):
+    """A DB created before the snapshot columns existed migrates on open."""
+    import sqlite3
+
+    db = tmp_path / "state.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE validation_state (finding_id VARCHAR(64) PRIMARY KEY,"
+        " state VARCHAR(32) NOT NULL, manual BOOLEAN NOT NULL, cwes TEXT, component TEXT)")
+    conn.execute(
+        "INSERT INTO validation_state VALUES ('old', 'confirmed', 1, NULL, 'lodash')")
+    conn.commit()
+    conn.close()
+
+    store = SqlStateStore(_dsn(tmp_path))
+    old = store.entry("old")                             # legacy row still readable…
+    assert old["state"] == ValidationState.confirmed
+    assert old["snapshot"] is None and old["decided_at"] == ""
+    store.record(_f("new"), manual=True)                 # …and new rows get snapshots
+    assert SqlStateStore(_dsn(tmp_path)).entry("new")["snapshot"]["risk_score"] == 50.0
 
 
 def test_manual_decision_not_clobbered_by_machine(tmp_path):

@@ -24,6 +24,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 from .audit import AuditLog
+from .calibration import calibration_report
 from .config import Config, TaskModel
 from .logging_setup import configure
 from .models import SERVICENOW_STATE, Finding, ValidationState
@@ -501,6 +502,12 @@ def create_app(
     def audit(limit: int = 200) -> dict:
         """Recent audit events (newest first) — scan runs, config + state changes."""
         return {"events": state.audit.tail(max(1, min(limit, 1000)))}
+
+    @app.get("/api/calibration")
+    def calibration() -> dict:
+        """Score calibration vs manual triage outcomes, from the state store."""
+        store = open_state_store(state.cfg.storage, state.state_path)
+        return calibration_report(store)
 
     @app.get("/api/servicenow")
     def servicenow() -> dict:

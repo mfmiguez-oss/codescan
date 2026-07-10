@@ -103,7 +103,7 @@ ServiceNow-ready output on its own.
 |---|---|---|
 | Connectors | `connectors/`, `openhack_engine.py`, `openhack_runner.py` | Talk to external systems; emit/consume raw scanner shapes; in-process whitebox review. |
 | Domain model | `models.py` | Canonical `Finding`, fingerprinting, state enums, difficulty signals. |
-| Processing | `dedup*.py`, `enrich/`, `exploitability.py`, `scoring.py`, `validation.py`, `feedback.py`, `threatmodel.py` | Transform findings; calibrate from feedback; synthesize threat models. |
+| Processing | `dedup*.py`, `enrich/`, `exploitability.py`, `scoring.py`, `validation.py`, `feedback.py`, `calibration.py`, `threatmodel.py` | Transform findings; calibrate from feedback; grade score calibration; synthesize threat models. |
 | AI infrastructure | `llm.py`, `providers/`, `concurrency.py` | Model routing (+ auto-route), multi-provider client, bounded parallelism. |
 | Cross-cutting | `logging_setup.py`, `audit.py`, `vault.py` | Observability, append-only audit log, secret sourcing. |
 | Orchestration | `pipeline.py` | Wire stages together; two ingest modes. |
@@ -395,9 +395,15 @@ FP; high score/severity → confirmed; else new). A human confirms or overrides.
 
 **Persistence** is the important property. The store persists each decision keyed
 by fingerprint and tags whether a human set it (`manual`), along with the finding's
-weakness/component attributes. On rescan, `assign_states` honors any manual decision
-or terminal closure and never re-opens it — analyst effort is never silently
-discarded. Machine proposals remain re-derivable.
+weakness/component attributes and a **machine-belief snapshot** — the risk score,
+AI exploitability score, EPSS, KEV, reachability, severity, and repo the pipeline
+held at record time, plus a `decided_at` timestamp. Because manual entries are
+never overwritten by machine records, an analyst decision keeps the prediction it
+was made against — the ground truth the calibration report (§5.7b) grades. On
+rescan, `assign_states` honors any manual decision or terminal closure and never
+re-opens it — analyst effort is never silently discarded. Machine proposals remain
+re-derivable. Entries persisted by releases before the snapshot existed still load
+(file store: absent keys; SQL store: `ADD COLUMN` migrations applied on open).
 
 The store is **pluggable** behind `StateStoreBase` (select via `storage.backend`,
 `open_state_store`): the file-backed `StateStore` (JSON, atomic writes — right for a
@@ -425,6 +431,30 @@ never pushed below `kev_floor`. Every adjusted finding records the reason in its
 rationale and a `feedback-adjusted` tag, and the scan's audit event carries the
 adjusted count — nothing is a black box.
 
+### 5.7b Calibration report (`calibration.py`)
+
+The feedback prior adapts scores; the calibration report **measures whether the
+scores were right to begin with**. It joins each manual `confirmed` /
+`false_positive` decision to the machine-belief snapshot frozen with it (§5.7)
+and reports:
+
+- **Confirm rate by predicted-score bucket** (0–39 / 40–59 / 60–79 / 80–100) —
+  the calibration curve. Rising with the bucket = the composite score predicts
+  analyst outcomes; flat or inverted = the weights or the AI stage need work.
+- **Score separation** — mean predicted score of confirmed vs false-positive
+  decisions.
+- **Noisiest keys** — CWE families/components whose manual history is dominated
+  by false positives (the same keys the feedback prior nudges): a concrete
+  scanner-tuning worklist.
+
+Like the prior, it uses only accuracy states, and it is read-only — it changes
+nothing, it grades. Decisions persisted before snapshots existed count toward
+totals but can't be bucketed (reported as `unscored`). Surfaced as
+`GET /api/calibration`, the UI **Calibration** tab, and `codescan calibration`
+on the CLI. Because the snapshot captures what the *configured* pipeline
+predicted, the report also makes provider/model routing changes (§5.5)
+empirically comparable over time.
+
 ### 5.8 ServiceNow export (`servicenow.py`)
 
 Builds `sn_vul_vulnerable_item` records, highest-risk first (VR queue order),
@@ -442,8 +472,9 @@ format is settable in config, the config UI, or with `--sn-format` on the CLI.
 
 FastAPI backend holding the latest `PipelineResult` in memory; a single
 dependency-free HTML page for the frontend. Endpoints: `GET /api/state`,
-`POST /api/scan`, `POST /api/findings/{id}/state`, `GET /api/servicenow`, and
-`GET`/`POST /api/config`, and `GET /api/export` (JSON/CSV download). Four views:
+`POST /api/scan`, `POST /api/findings/{id}/state`, `GET /api/servicenow`,
+`GET /api/calibration`, `GET`/`POST /api/config`, and `GET /api/export`
+(JSON/CSV download). The views:
 
 - **Overview** — the landing page: run status (source, mode, last run), key
   metrics, a severity breakdown, quick actions (run, download JSON/CSV, jump to
@@ -456,6 +487,9 @@ dependency-free HTML page for the frontend. Endpoints: `GET /api/state`,
 - **Threats** — the per-service threat models (§5.10): STRIDE threats with
   linked findings/chains, assets, entry points, trust boundaries, posture, and
   recommendations.
+- **Calibration** — the score-calibration report (§5.7b): confirm rate by
+  predicted-score bucket, score separation, and the noisiest weakness
+  families/components.
 - **Config** — edit non-secret settings live: the repo source (Bitbucket/GitHub)
   and GitHub repo/org targets, default AI tier, per-task model routing,
   enrichment toggles, scoring weights, and the ServiceNow push flag/format.
@@ -703,7 +737,8 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
 - **ServiceNow** (`tests/test_servicenow.py`) — JSON/CSV output **and the Table
   API push path** (posts each record; a failing push doesn't abort the export).
 - **State store** (`tests/test_validation.py`) — atomic save round-trip, no temp
-  leftover, and crash-during-replace preserves the existing file.
+  leftover, crash-during-replace preserves the existing file, machine-belief
+  snapshot capture, and legacy (pre-snapshot) entries loading cleanly.
 - **Vault** (`tests/test_vault.py`) — KV v1/v2 injection, override semantics, auth
   errors, and the `Config.load` wiring (fake client).
 - **Audit log** (`tests/test_audit.py`) — record/tail JSONL round-trip, disabled
@@ -714,8 +749,12 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   confirmed raises the score, min-evidence gate, self-exclusion, KEV-floor respect,
   disabled no-op, accuracy-states-only, and store attribute round-trip.
 - **SQL state store** (`tests/test_state_store_sql.py`) — backend factory,
-  round-trip/persistence, the manual-not-clobbered-by-machine concurrency guard,
-  feedback over the SQL store, and a pipeline run persisting to SQLite.
+  round-trip/persistence (incl. snapshots), the manual-not-clobbered-by-machine
+  concurrency guard, the pre-snapshot schema upgrading in place, feedback over
+  the SQL store, and a pipeline run persisting to SQLite.
+- **Calibration** (`tests/test_calibration.py`) — bucket/rate math, accuracy
+  states only, noisy-key surfacing, legacy decisions counted but unbucketed, and
+  the empty-store zeroed report; endpoint coverage in `test_web.py`.
 - **Enterprise / Fable 5** (`tests/test_enterprise.py`) — `inference_geo` threaded
   onto requests, Fable's data-retention 400 re-raised actionably, and the
   enterprise config profile routing deep tasks to Fable / mechanical to Haiku.

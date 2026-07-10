@@ -122,6 +122,23 @@ def test_change_validation_state_persists(tmp_path):
     assert reran["validation_state"] == "risk_accepted"
 
 
+def test_calibration_endpoint(tmp_path):
+    client = _client(tmp_path)
+    findings = client.get("/api/state").json()["findings"]
+
+    # No manual decisions yet -> an empty, renderable report.
+    assert client.get("/api/calibration").json()["decisions"] == 0
+
+    client.post(f"/api/findings/{findings[0]['id']}/state", json={"state": "confirmed"})
+    client.post(f"/api/findings/{findings[1]['id']}/state", json={"state": "false_positive"})
+    report = client.get("/api/calibration").json()
+
+    assert report["decisions"] == 2
+    assert report["confirmed"] == 1 and report["false_positives"] == 1
+    # Both decisions carried a score snapshot, so both landed in a bucket.
+    assert sum(b["total"] for b in report["buckets"]) == 2
+
+
 def test_invalid_state_rejected(tmp_path):
     client = _client(tmp_path)
     fid = client.get("/api/state").json()["findings"][0]["id"]

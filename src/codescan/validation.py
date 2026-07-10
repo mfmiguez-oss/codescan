@@ -19,6 +19,7 @@ import json
 import os
 import tempfile
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import StorageConfig
@@ -30,6 +31,31 @@ _TERMINAL_CLOSURE_STATES = {
     ValidationState.risk_accepted,
     ValidationState.resolved,
 }
+
+
+def _snapshot(f: Finding) -> dict:
+    """What the machine believed about the finding at record time.
+
+    Frozen alongside a manual decision, this is the ground truth the calibration
+    report (calibration.py) compares against: "the pipeline said risk 87 — did
+    the analyst confirm it?". Manual entries are never overwritten by machine
+    records, so an analyst decision keeps the belief it was made against.
+    """
+    ex = f.exploitability
+    return {
+        "severity": f.severity.value,
+        "cvss": f.cvss_score,
+        "epss": ex.epss,
+        "in_kev": ex.in_kev,
+        "reachable": ex.reachable,
+        "ai_score": ex.score,
+        "risk_score": f.risk_score,
+        "repo": f.location.repo,
+    }
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 class StateStoreBase(ABC):
@@ -64,7 +90,8 @@ class StateStore(StateStoreBase):
             for fid, val in raw.items():
                 if isinstance(val, str):
                     self._entries[fid] = {"state": _coerce_state(val), "manual": True,
-                                          "cwes": [], "component": ""}
+                                          "cwes": [], "component": "",
+                                          "snapshot": None, "decided_at": ""}
                 else:
                     self._entries[fid] = {
                         "state": _coerce_state(val["state"]),
@@ -73,6 +100,10 @@ class StateStore(StateStoreBase):
                         # absent on legacy entries, which simply don't contribute.
                         "cwes": list(val.get("cwes", [])),
                         "component": val.get("component", ""),
+                        # Machine-belief snapshot for calibration (calibration.py);
+                        # legacy entries have none and are excluded from score buckets.
+                        "snapshot": val.get("snapshot"),
+                        "decided_at": val.get("decided_at", ""),
                     }
 
     def entry(self, finding_id: str) -> dict | None:
@@ -87,10 +118,12 @@ class StateStore(StateStoreBase):
 
     def record(self, finding: Finding, *, manual: bool = False) -> None:
         # Capture the weakness/component so a manual decision can inform the
-        # feedback prior for similar findings later (feedback.py).
+        # feedback prior for similar findings later (feedback.py), plus the
+        # machine-belief snapshot the calibration report grades against.
         self._entries[finding.id] = {
             "state": finding.validation_state, "manual": manual,
             "cwes": list(finding.cwe_ids), "component": finding.component.name,
+            "snapshot": _snapshot(finding), "decided_at": _now_iso(),
         }
 
     def save(self) -> None:
@@ -102,6 +135,10 @@ class StateStore(StateStoreBase):
                 e["cwes"] = v["cwes"]
             if v.get("component"):
                 e["component"] = v["component"]
+            if v.get("snapshot"):
+                e["snapshot"] = v["snapshot"]
+            if v.get("decided_at"):
+                e["decided_at"] = v["decided_at"]
             return e
 
         payload = json.dumps({k: _dump(v) for k, v in self._entries.items()}, indent=2)
@@ -127,7 +164,18 @@ _DDL = (
     " state VARCHAR(32) NOT NULL,"
     " manual BOOLEAN NOT NULL,"
     " cwes TEXT,"
-    " component TEXT)"
+    " component TEXT,"
+    " snapshot TEXT,"
+    " decided_at VARCHAR(40))"
+)
+
+# Columns added after the table first shipped; applied one at a time so a
+# database created by an older release upgrades in place (ADD COLUMN on an
+# existing column errors — caught and skipped — since neither SQLite nor
+# Postgres <9.6-style portability offers IF NOT EXISTS here).
+_MIGRATIONS = (
+    "ALTER TABLE validation_state ADD COLUMN snapshot TEXT",
+    "ALTER TABLE validation_state ADD COLUMN decided_at VARCHAR(40)",
 )
 
 
@@ -153,13 +201,20 @@ class SqlStateStore(StateStoreBase):
         self._engine = sa.create_engine(dsn, future=True)
         with self._engine.begin() as conn:
             conn.execute(sa.text(_DDL))
+        for ddl in _MIGRATIONS:
+            try:
+                with self._engine.begin() as conn:
+                    conn.execute(sa.text(ddl))
+            except sa.exc.DatabaseError:
+                pass  # column already exists (fresh DDL or a prior migration)
         self._entries: dict[str, dict] = self._load()
 
     def _load(self) -> dict[str, dict]:
         sa = self._sa
         with self._engine.connect() as conn:
             rows = conn.execute(sa.text(
-                "SELECT finding_id, state, manual, cwes, component FROM validation_state"
+                "SELECT finding_id, state, manual, cwes, component, snapshot, decided_at"
+                " FROM validation_state"
             )).mappings().all()
         out: dict[str, dict] = {}
         for r in rows:
@@ -168,6 +223,8 @@ class SqlStateStore(StateStoreBase):
                 "manual": bool(r["manual"]),
                 "cwes": json.loads(r["cwes"]) if r["cwes"] else [],
                 "component": r["component"] or "",
+                "snapshot": json.loads(r["snapshot"]) if r["snapshot"] else None,
+                "decided_at": r["decided_at"] or "",
             }
         return out
 
@@ -185,6 +242,7 @@ class SqlStateStore(StateStoreBase):
         entry = {
             "state": finding.validation_state, "manual": manual,
             "cwes": list(finding.cwe_ids), "component": finding.component.name,
+            "snapshot": _snapshot(finding), "decided_at": _now_iso(),
         }
         self._write(finding.id, entry)
         self._entries[finding.id] = entry
@@ -198,6 +256,8 @@ class SqlStateStore(StateStoreBase):
             "id": fid, "state": entry["state"].value, "manual": entry["manual"],
             "cwes": json.dumps(entry["cwes"]) if entry["cwes"] else None,
             "component": entry["component"] or None,
+            "snapshot": json.dumps(entry["snapshot"]) if entry.get("snapshot") else None,
+            "decided_at": entry.get("decided_at") or None,
         }
         terminal = [s.value for s in _TERMINAL_CLOSURE_STATES]
         with self._engine.begin() as conn:
@@ -205,14 +265,16 @@ class SqlStateStore(StateStoreBase):
                 # Analyst decision always wins.
                 updated = conn.execute(sa.text(
                     "UPDATE validation_state SET state=:state, manual=:manual,"
-                    " cwes=:cwes, component=:component WHERE finding_id=:id"), params).rowcount
+                    " cwes=:cwes, component=:component, snapshot=:snapshot,"
+                    " decided_at=:decided_at WHERE finding_id=:id"), params).rowcount
                 if not updated:
                     self._insert(conn, params)
                 return
             # Machine proposal: only update a row that isn't a protected (manual or
             # terminal) decision; insert if the row is absent.
             stmt = sa.text(
-                "UPDATE validation_state SET state=:state, cwes=:cwes, component=:component"
+                "UPDATE validation_state SET state=:state, cwes=:cwes, component=:component,"
+                " snapshot=:snapshot, decided_at=:decided_at"
                 " WHERE finding_id=:id AND manual=:false AND state NOT IN :terminal"
             ).bindparams(sa.bindparam("terminal", expanding=True))
             updated = conn.execute(stmt, {**params, "false": False, "terminal": terminal}).rowcount
@@ -226,8 +288,10 @@ class SqlStateStore(StateStoreBase):
         sa = self._sa
         try:
             conn.execute(sa.text(
-                "INSERT INTO validation_state (finding_id, state, manual, cwes, component)"
-                " VALUES (:id, :state, :manual, :cwes, :component)"), params)
+                "INSERT INTO validation_state"
+                " (finding_id, state, manual, cwes, component, snapshot, decided_at)"
+                " VALUES (:id, :state, :manual, :cwes, :component, :snapshot, :decided_at)"),
+                params)
         except sa.exc.IntegrityError:
             pass  # a concurrent writer inserted first — fine, their row stands
 

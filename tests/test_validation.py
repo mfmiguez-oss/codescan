@@ -30,6 +30,38 @@ def test_save_reload_roundtrip(tmp_path):
     assert reloaded.entry("f1")["manual"] is True
 
 
+def test_record_captures_machine_belief_snapshot(tmp_path):
+    path = tmp_path / "state.json"
+    store = StateStore(path)
+    f = _finding()
+    f.risk_score = 87.5
+    f.exploitability.score = 80.0
+    f.exploitability.epss = 0.42
+    f.exploitability.in_kev = True
+    f.exploitability.reachable = True
+    f.validation_state = ValidationState.confirmed
+    store.record(f, manual=True)
+    store.save()
+
+    snap = StateStore(path).entry("f1")["snapshot"]
+    assert snap["risk_score"] == 87.5 and snap["ai_score"] == 80.0
+    assert snap["epss"] == 0.42 and snap["in_kev"] is True and snap["reachable"] is True
+    assert snap["repo"] == "a/b" and snap["severity"] == "info"
+    assert StateStore(path).entry("f1")["decided_at"]     # ISO timestamp recorded
+
+
+def test_legacy_entries_load_without_snapshot(tmp_path):
+    path = tmp_path / "state.json"
+    path.write_text(json.dumps({
+        "flat": "confirmed",                                            # oldest format
+        "pre_snapshot": {"state": "false_positive", "manual": True},    # pre-snapshot dict
+    }), encoding="utf-8")
+    store = StateStore(path)
+    for fid in ("flat", "pre_snapshot"):
+        assert store.entry(fid)["snapshot"] is None
+        assert store.entry(fid)["decided_at"] == ""
+
+
 def test_save_is_atomic_no_temp_leftover(tmp_path):
     path = tmp_path / "state.json"
     store = StateStore(path)

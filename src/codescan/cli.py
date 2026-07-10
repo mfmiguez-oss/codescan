@@ -107,6 +107,56 @@ def serve(
 
 
 @app.command()
+def calibration(
+    config: str = typer.Option("config/config.example.yaml", help="Path to config YAML."),
+    state: str = typer.Option("validation_state.json", help="Validation-state store path."),
+) -> None:
+    """Grade past risk scores against analysts' confirm / false-positive decisions."""
+    configure()
+    from .calibration import calibration_report
+    from .validation import open_state_store
+
+    cfg = Config.load(config)
+    report = calibration_report(open_state_store(cfg.storage, state))
+
+    if not report["decisions"]:
+        console.print("No manual confirmed/false-positive decisions recorded yet — "
+                      "triage findings in the UI (or ServiceNow) and re-run.")
+        return
+
+    rate = f"{report['confirm_rate']:.0%}" if report["confirm_rate"] is not None else "—"
+    console.print(f"[bold]codescan calibration[/bold]: {report['decisions']} manual decisions "
+                  f"({report['confirmed']} confirmed, {report['false_positives']} false "
+                  f"positives, {rate} confirm rate)")
+    if report["unscored"]:
+        console.print(f"  {report['unscored']} decision(s) predate score snapshots "
+                      "and are excluded from the buckets below.")
+
+    table = Table(title="Confirm rate by predicted risk score (should rise with the bucket)")
+    table.add_column("Predicted score")
+    table.add_column("Decisions", justify="right")
+    table.add_column("Confirmed", justify="right")
+    table.add_column("False positives", justify="right")
+    table.add_column("Confirm rate", justify="right")
+    for b in report["buckets"]:
+        table.add_row(b["bucket"], str(b["total"]), str(b["confirmed"]),
+                      str(b["false_positive"]),
+                      f"{b['confirm_rate']:.0%}" if b["confirm_rate"] is not None else "—")
+    console.print(table)
+
+    mc, mf = report["mean_score_confirmed"], report["mean_score_false_positive"]
+    if mc is not None and mf is not None:
+        console.print(f"Mean predicted score: confirmed {mc} vs false positive {mf} "
+                      f"(separation {mc - mf:+.1f})")
+    if report["noisy_keys"]:
+        console.print("\n[bold]Noisiest weakness families / components[/bold] "
+                      "(mostly dismissed as false positives)")
+        for k in report["noisy_keys"]:
+            console.print(f"  {k['key']}: {k['false_positive']} FP vs "
+                          f"{k['confirmed']} confirmed ({k['fp_rate']:.0%} FP rate)")
+
+
+@app.command()
 def summary(out: str = typer.Option("servicenow_import.json")) -> None:
     """Print a summary of an existing ServiceNow import file."""
     records = json.loads(Path(out).read_text(encoding="utf-8")).get("records", [])
