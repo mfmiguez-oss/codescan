@@ -11,3 +11,5 @@ validation_state.json
 state_demo.json
 node_modules/
 config.overrides.json
+audit.jsonl
+threat_models.json

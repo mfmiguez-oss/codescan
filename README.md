@@ -507,6 +507,15 @@ docker compose -f docker-compose.prod.yml up -d --build
 - **Secrets stay in the environment** — the image holds none; provide them via
   `--env-file` / your orchestrator's secret store, never baked into config or the
   image.
+- **Audit log.** Every scan run, config change, and validation-state change is
+  appended (with an **actor + UTC timestamp**) to a JSONL audit file
+  (`audit.enabled`/`audit.path`, default `audit.jsonl` under `/data`) — a durable,
+  append-only decision record for monitoring and after-the-fact auditing, separate
+  from the operational logs. Review it in the UI's **Audit** tab or at
+  `GET /api/audit`. The actor is taken from your SSO / reverse-proxy identity header
+  (`X-Remote-User` / `X-Forwarded-User`) when present, so put codescan behind an
+  authenticating proxy to attribute decisions to real users. Persist `/data` to
+  keep the trail across restarts.
 
 **Secrets from HashiCorp Vault (built-in).** codescan can pull secrets straight
 from Vault. Install the extra (`pip install 'codescan[vault]'`) and enable it in

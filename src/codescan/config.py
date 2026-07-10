@@ -200,6 +200,16 @@ class VaultConfig(_StrictModel):
     verify_tls: bool = True
 
 
+class AuditConfig(_StrictModel):
+    """Append-only audit log of key events (scan runs, config + validation-state
+    changes) with actor + timestamp, one JSON object per line (JSONL)."""
+
+    enabled: bool = True
+    # File path; relative paths resolve next to the run's other artifacts
+    # (the ServiceNow export dir, e.g. /data in the container).
+    path: str = "audit.jsonl"
+
+
 class ScoringConfig(_StrictModel):
     weights: dict[str, float] = {
         "severity": 0.30,
@@ -223,6 +233,7 @@ class Config(_StrictModel):
     threat_model: ThreatModelConfig = ThreatModelConfig()
     scoring: ScoringConfig = ScoringConfig()
     vault: VaultConfig = VaultConfig()
+    audit: AuditConfig = AuditConfig()
 
     @classmethod
     def load(cls, path: str | Path) -> "Config":

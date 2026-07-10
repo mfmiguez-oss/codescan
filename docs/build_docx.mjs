@@ -271,6 +271,7 @@ const children = [
     "Idempotency as integrity — correlation_id upserts prevent a misfired run from flooding VR with duplicates.",
     "Optional API-token guard — CODESCAN_API_TOKEN guards /api/* (Authorization: Bearer, X-API-Token, or a cookie set from /?token=) with a constant-time compare; healthz and the static shell stay open. Defense in depth for accidental exposure; SSO/RBAC belongs at the reverse proxy.",
     "Fail-loud config — config models reject unknown keys (extra=forbid), so a misspelled security setting fails at load rather than silently reverting to a default.",
+    "Append-only audit log (audit.py) — scan runs, config changes, and validation-state changes are appended to a JSONL file with an actor + UTC timestamp: a durable decision record for monitoring/auditing, distinct from operational logs. Actor is best-effort from an SSO/reverse-proxy identity header (X-Remote-User / X-Forwarded-User); surfaced in the UI Audit tab and GET /api/audit.",
   ]),
 
   H1("9. Failure modes & resilience"),
@@ -318,6 +319,7 @@ const children = [
     "ServiceNow (tests/test_servicenow.py) — JSON/CSV output and the Table API push path (posts each record; a failing push doesn't abort the export).",
     "State store (tests/test_validation.py) — atomic save round-trip, no temp leftover, crash-during-replace preserves the existing file.",
     "Vault (tests/test_vault.py) — KV v1/v2 injection, override semantics, auth errors, and the Config.load wiring.",
+    "Audit log (tests/test_audit.py) — record/tail JSONL round-trip, disabled no-op, pipeline scan events, and web actor-attributed config/state events via GET /api/audit.",
     "Web API (tests/test_web.py) — FastAPI TestClient over state, scan, state-change (persisted across rescan), validation, ServiceNow, and the API-token guard.",
     "All tests run offline with no Anthropic key; AI stages are validated by contract (schema) rather than live calls. CI (.github/workflows/ci.yml) runs ruff + mypy + pytest on a 3.10-3.12 matrix and builds the image on every push/PR; mypy is a clean gate and the package ships py.typed.",
   ]),
@@ -330,6 +332,7 @@ const children = [
     "openhack — whitebox review: enabled/findings_dir (ingest), auto/clone/command (run), and built-in-engine tuning (passes, pass_models for per-pass suppliers, max_files, max_file_bytes, min_confidence).",
     "servicenow — instance, credentials, push toggle, import table, format.",
     "vault — optional HashiCorp Vault secret source: enabled, address, auth (token/approle), kv_mount/kv_version, paths, override_env.",
+    "audit — append-only JSONL audit log: enabled, path.",
     "enrichment — KEV/EPSS feed URLs + per-enricher toggles.",
     "threat_model — enabled.",
     "scoring — dimension weights + kev_floor.",

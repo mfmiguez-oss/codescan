@@ -105,6 +105,7 @@ ServiceNow-ready output on its own.
 | Domain model | `models.py` | Canonical `Finding`, fingerprinting, state enums, difficulty signals. |
 | Processing | `dedup*.py`, `enrich/`, `exploitability.py`, `scoring.py`, `validation.py`, `threatmodel.py` | Transform findings; synthesize threat models. |
 | AI infrastructure | `llm.py`, `providers/`, `concurrency.py` | Model routing (+ auto-route), multi-provider client, bounded parallelism. |
+| Cross-cutting | `logging_setup.py`, `audit.py`, `vault.py` | Observability, append-only audit log, secret sourcing. |
 | Orchestration | `pipeline.py` | Wire stages together; two ingest modes. |
 | Interfaces | `cli.py`, `web.py`, `static/` | CLI, HTTP API, dashboard. |
 
@@ -567,6 +568,12 @@ to an LLM and to ServiceNow. Considerations:
 - **Fail-loud config.** Config models reject unknown keys (`extra="forbid"`), so a
   misspelled security setting fails at load rather than silently reverting to a
   default.
+- **Append-only audit log** (`audit.py`). Scan runs, config changes, and
+  validation-state changes are appended to a JSONL file with an actor + UTC
+  timestamp — a durable decision record for monitoring/auditing, distinct from the
+  operational logs. Actor attribution is best-effort from an SSO/reverse-proxy
+  identity header (`X-Remote-User` / `X-Forwarded-User`); behind such a proxy the
+  trail names real users. Surfaced in the UI's Audit tab and `GET /api/audit`.
 
 ---
 
@@ -651,6 +658,9 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   leftover, and crash-during-replace preserves the existing file.
 - **Vault** (`tests/test_vault.py`) — KV v1/v2 injection, override semantics, auth
   errors, and the `Config.load` wiring (fake client).
+- **Audit log** (`tests/test_audit.py`) — record/tail JSONL round-trip, disabled
+  no-op, pipeline scan events, and the web actor-attributed config/state events via
+  `GET /api/audit`.
 - **Web API** (`tests/test_web.py`) — FastAPI TestClient over state, scan,
   state-change (persistent-across-rescan), validation, ServiceNow, and the
   **API-token guard** (401 without, accepted via header/cookie, healthz open).
@@ -681,6 +691,7 @@ builds the image on every push/PR; `mypy` is a clean gate and the package ships
 - `scoring` — dimension weights + `kev_floor`.
 - `vault` — optional HashiCorp Vault secret source: `enabled`, `address`,
   `auth` (token/approle), `kv_mount`/`kv_version`, `paths`, `override_env`.
+- `audit` — append-only JSONL audit log: `enabled`, `path`.
 
 CLI: `codescan scan` (pipeline), `codescan serve` (UI), `codescan summary`
 (inspect an export). Flags gate AI (`--no-ai` / `--ai`), network enrichment

@@ -131,6 +131,7 @@
     <button class="tab active" data-view="overview">Overview</button>
     <button class="tab" data-view="findings">Findings</button>
     <button class="tab" data-view="threats">Threats</button>
+    <button class="tab" data-view="audit">Audit</button>
     <button class="tab" data-view="config">Config</button>
   </nav>
   <div class="chips" id="chips"></div>
@@ -174,6 +175,7 @@
     <div class="empty" id="empty" style="display:none">No findings match the filters.</div>
   </div>
   <section id="threatsView" class="cfg" style="display:none"></section>
+  <section id="auditView" class="cfg" style="display:none"></section>
   <section id="configView" class="cfg" style="display:none"></section>
 </main>
 
@@ -367,6 +369,30 @@ function chainCard(c) {
   </div>`;
 }
 
+async function renderAudit() {
+  const el = $('#auditView');
+  el.innerHTML = '<div class="card"><h4>Audit log</h4><p class="hint">Loading…</p></div>';
+  try {
+    const events = ((await (await fetch('/api/audit?limit=200')).json()).events) || [];
+    const body = events.length ? events.map(e => {
+      const extra = Object.entries(e).filter(([k]) => !['ts','event','actor'].includes(k))
+        .map(([k,v]) => `${esc(k)}=${esc(String(v))}`).join(' · ');
+      return `<tr>
+        <td class="muted" style="white-space:nowrap">${esc(e.ts||'')}</td>
+        <td><span class="badge">${esc(e.event||'')}</span></td>
+        <td>${esc(e.actor||'')}</td>
+        <td class="muted" style="font-size:12px">${extra}</td></tr>`;
+    }).join('') : '';
+    el.innerHTML = `<div class="card">
+      <h4>Audit log</h4>
+      <p class="hint">Append-only record of scan runs, configuration changes, and validation-state changes (newest first). Actor comes from your SSO / reverse-proxy identity header when present.</p>
+      ${events.length ? `<table><thead><tr><th>Time (UTC)</th><th>Event</th><th>Actor</th><th>Details</th></tr></thead><tbody>${body}</tbody></table>` : '<div class="empty">No events recorded yet.</div>'}
+    </div>`;
+  } catch (err) {
+    el.innerHTML = `<div class="card"><h4>Audit log</h4><div class="empty">Failed to load: ${esc(String(err))}</div></div>`;
+  }
+}
+
 function renderThreats() {
   const tms = DATA.threat_models || [];
   if (!tms.length) {
@@ -459,8 +485,10 @@ function switchView(view) {
   $('#overviewView').style.display = view === 'overview' ? 'block' : 'none';
   $('#findingsView').style.display = view === 'findings' ? 'block' : 'none';
   $('#threatsView').style.display = view === 'threats' ? 'block' : 'none';
+  $('#auditView').style.display = view === 'audit' ? 'block' : 'none';
   $('#configView').style.display = view === 'config' ? 'block' : 'none';
   if (view === 'config' && !CONFIG) loadConfig();
+  if (view === 'audit') renderAudit();
   if (view === 'threats') renderThreats();
   if (view === 'overview') renderOverview();
 }

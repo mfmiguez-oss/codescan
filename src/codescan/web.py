@@ -23,6 +23,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 
+from .audit import AuditLog
 from .config import Config, TaskModel
 from .logging_setup import configure
 from .models import SERVICENOW_STATE, Finding, ValidationState
@@ -50,6 +51,31 @@ def _request_token(request: Request) -> str:
     if auth.startswith("Bearer "):
         return auth[7:].strip()
     return request.headers.get("X-API-Token") or request.cookies.get(_TOKEN_COOKIE) or ""
+
+
+# Common SSO / reverse-proxy identity headers. codescan doesn't do per-user auth
+# itself; when it runs behind an authenticating proxy, that proxy sets one of these
+# and the audit log attributes actions to a real user.
+_ACTOR_HEADERS = ("X-Remote-User", "X-Forwarded-User", "X-Authenticated-User", "X-Auth-Request-User")
+
+
+def _actor(request: Request) -> str:
+    for h in _ACTOR_HEADERS:
+        if request.headers.get(h):
+            return request.headers[h]
+    return "anonymous"
+
+
+def _dotted_keys(d: dict, prefix: str = "") -> list[str]:
+    """Flatten a nested dict to leaf key paths (names only) for the audit record."""
+    out: list[str] = []
+    for k, v in d.items():
+        path = f"{prefix}{k}"
+        if isinstance(v, dict) and v:
+            out.extend(_dotted_keys(v, f"{path}."))
+        else:
+            out.append(path)
+    return out
 
 # Surfaced to the config UI for dropdowns.
 KNOWN_MODELS = [
@@ -326,17 +352,18 @@ class AppState:
         # Layer any UI-saved overrides on top of the base config.
         if self.overrides_path and self.overrides_path.exists():
             apply_config(self.cfg, json.loads(self.overrides_path.read_text(encoding="utf-8")))
+        self.audit = AuditLog(self.cfg.audit, base_dir=Path(out_path).parent)
         self.result: PipelineResult = PipelineResult()
         self.startup_error: str | None = None
         # Avoid failing server startup if the initial scan fails (e.g. live mode
         # with missing credentials). Boot empty; the operator can fix config and
         # retry from the UI.
         try:
-            self.scan()
+            self.scan(actor="startup")
         except Exception as exc:  # noqa: BLE001 - surface, don't fail startup
             self.startup_error = str(exc)
 
-    def update_config(self, update: dict) -> dict:
+    def update_config(self, update: dict, *, actor: str = "system") -> dict:
         apply_config(self.cfg, update)                  # validate + apply (raises on bad)
         if self.overrides_path:
             merged = {}
@@ -344,15 +371,18 @@ class AppState:
                 merged = json.loads(self.overrides_path.read_text(encoding="utf-8"))
             _deep_merge(merged, update)
             self.overrides_path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+        # Record which settings changed (names only — values may be verbose; secrets
+        # never reach here, they stay in the environment).
+        self.audit.record("config.changed", actor=actor, keys=sorted(_dotted_keys(update)))
         return sanitized_config(self.cfg)
 
-    def scan(self, use_ai=None, offline=None, live=None) -> PipelineResult:
+    def scan(self, use_ai=None, offline=None, live=None, *, actor: str = "system") -> PipelineResult:
         ai = self.use_ai if use_ai is None else use_ai
         off = self.offline if offline is None else offline
         lv = self.live if live is None else live
         fx = None if lv else self.fixtures       # None -> live ingest
         self.result = Pipeline(self.cfg, offline=off, use_ai=ai).run(
-            fixtures=fx, out_path=self.out_path, state_path=self.state_path
+            fixtures=fx, out_path=self.out_path, state_path=self.state_path, actor=actor,
         )
         # Remember what was actually run, so the UI reflects it.
         self.use_ai, self.offline, self.live = ai, off, lv
@@ -360,14 +390,17 @@ class AppState:
         self.last_scan = datetime.now(timezone.utc).isoformat(timespec="seconds")
         return self.result
 
-    def set_state(self, fid: str, state: str) -> Finding:
+    def set_state(self, fid: str, state: str, *, actor: str = "system") -> Finding:
         f = next((x for x in self.result.findings if x.id == fid), None)
         if f is None:
             raise KeyError(fid)
+        previous = f.validation_state.value
         f.validation_state = ValidationState(state)     # raises ValueError if invalid
         store = StateStore(self.state_path)             # merge into existing decisions
         store.record(f, manual=True)
         store.save()
+        self.audit.record("validation.changed", actor=actor, finding_id=fid,
+                          title=f.title, **{"from": previous, "to": f.validation_state.value})
         return f
 
     def servicenow_items(self) -> list[dict]:
@@ -439,25 +472,30 @@ def create_app(
         return _payload(state)
 
     @app.post("/api/scan")
-    def scan(req: ScanRequest) -> dict:
+    def scan(req: ScanRequest, request: Request) -> dict:
         # Surface scan failures (e.g. live mode, invalid credentials) as an
         # error banner rather than a 500 response — the previous result stays
         # visible.
         try:
-            state.scan(req.use_ai, req.offline, req.live)
+            state.scan(req.use_ai, req.offline, req.live, actor=_actor(request))
         except Exception as exc:  # noqa: BLE001
             state.startup_error = str(exc)
         return _payload(state)
 
     @app.post("/api/findings/{fid}/state")
-    def set_state(fid: str, change: StateChange) -> dict:
+    def set_state(fid: str, change: StateChange, request: Request) -> dict:
         try:
-            f = state.set_state(fid, change.state)
+            f = state.set_state(fid, change.state, actor=_actor(request))
         except KeyError:
             raise HTTPException(status_code=404, detail="finding not found")
         except ValueError:
             raise HTTPException(status_code=400, detail="invalid validation state")
         return finding_to_dict(f)
+
+    @app.get("/api/audit")
+    def audit(limit: int = 200) -> dict:
+        """Recent audit events (newest first) — scan runs, config + state changes."""
+        return {"events": state.audit.tail(max(1, min(limit, 1000)))}
 
     @app.get("/api/servicenow")
     def servicenow() -> dict:
@@ -482,9 +520,9 @@ def create_app(
         return sanitized_config(state.cfg)
 
     @app.post("/api/config")
-    def set_config(update: dict) -> dict:
+    def set_config(update: dict, request: Request) -> dict:
         try:
-            return state.update_config(update)
+            return state.update_config(update, actor=_actor(request))
         except (ValueError, TypeError, KeyError) as exc:
             raise HTTPException(status_code=400, detail=f"invalid config: {exc}")
 

@@ -166,6 +166,14 @@ vault:
   paths: ["codescan"]
   override_env: false          # false = an already-set env var wins
 
+# Append-only audit log (JSONL) of key events — scan runs, config changes, and
+# validation-state changes — each with an actor + UTC timestamp. Viewable in the
+# UI's Audit tab and at GET /api/audit. Actor comes from your SSO/reverse-proxy
+# identity header (X-Remote-User / X-Forwarded-User) when present.
+audit:
+  enabled: true
+  path: audit.jsonl      # relative -> written next to the other run artifacts (/data)
+
 scoring:
   # Weights for the composite 0-100 risk score. Must sum to 1.0.
   weights:

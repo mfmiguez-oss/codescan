@@ -21,6 +21,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .audit import AuditLog
 from .config import Config
 from .connectors import (
     BitbucketConnector, GitHubConnector, OpenHackConnector, SnykConnector, XrayConnector,
@@ -142,12 +143,16 @@ class Pipeline:
         fixtures: str | Path | None = None,
         out_path: str | Path = "servicenow_import.json",
         state_path: str | Path | None = "validation_state.json",
+        actor: str = "cli",
     ) -> PipelineResult:
         run_id = uuid.uuid4().hex[:8]
         t0 = time.perf_counter()
         mode = "fixtures" if fixtures else "live"
+        audit = AuditLog(self.cfg.audit, base_dir=Path(out_path).parent)
         logger.info("scan %s start: mode=%s ai=%s offline=%s",
                     run_id, mode, self.use_ai, self.offline)
+        audit.record("scan.started", actor=actor, run_id=run_id, mode=mode,
+                     ai=self.use_ai, offline=self.offline)
 
         # Build one shared LLM client + task router for every AI stage — up front,
         # so live ingest can hand it to the built-in OpenHack review engine.
@@ -197,11 +202,15 @@ class Pipeline:
         exporter = ServiceNowExporter(self.cfg.servicenow)
         items = exporter.export(findings, chains, out_path)
 
+        kev = sum(1 for f in findings if f.exploitability.in_kev)
+        duration = round(time.perf_counter() - t0, 2)
         logger.info(
             "scan %s done in %.2fs: %d findings, %d chains, %d threat models, "
             "%d KEV, %d exported",
-            run_id, time.perf_counter() - t0, len(findings), len(chains),
-            len(threat_models), sum(1 for f in findings if f.exploitability.in_kev), len(items),
+            run_id, duration, len(findings), len(chains), len(threat_models), kev, len(items),
         )
+        audit.record("scan.completed", actor=actor, run_id=run_id, mode=mode,
+                     repos=len(repos), findings=len(findings), chains=len(chains),
+                     threat_models=len(threat_models), kev=kev, duration_s=duration)
         return PipelineResult(repos=repos, findings=findings, chains=chains,
                               threat_models=threat_models, servicenow_items=items)
