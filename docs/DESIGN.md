@@ -543,6 +543,13 @@ to an LLM and to ServiceNow. Considerations:
   import table only; scanner tokens are read-only.
 - **Idempotency as integrity.** `correlation_id` upserts prevent a misfired run
   from flooding VR with duplicates.
+- **Optional API-token guard.** `CODESCAN_API_TOKEN` guards `/api/*`
+  (`Authorization: Bearer`, `X-API-Token`, or a cookie set from `/?token=`), with a
+  constant-time compare; `/healthz` and the static shell stay open. It's defense in
+  depth for accidental exposure — SSO/RBAC belongs at the reverse proxy.
+- **Fail-loud config.** Config models reject unknown keys (`extra="forbid"`), so a
+  misspelled security setting fails at load rather than silently reverting to a
+  default.
 
 ---
 
@@ -599,8 +606,9 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   ~50% for non-latency-sensitive runs.
 - **ServiceNow field mapping** targets a generic `sn_vul_vulnerable_item` import;
   it must be aligned to each deployment's VR transform map.
-- **No auth on the web UI.** The dashboard assumes a trusted network / upstream
-  SSO; add authn/authz before exposing it.
+- **Web UI auth is a single shared token, not full authn/z.** `CODESCAN_API_TOKEN`
+  guards `/api/*` (defense in depth); it is not per-user identity or RBAC — front
+  the dashboard with SSO for that.
 
 ---
 
@@ -617,13 +625,23 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   dependency-dir skipping, min-confidence, and **multi-pass union + cross-pass
   agreement** with a stubbed LLM; the connector's tag-merge in `test_openhack.py`.
 - **Concurrency** (`tests/test_concurrency.py`) — order preservation, genuine
-  parallelism (barrier), and the single-item sequential fallback.
-- **Web API** (`tests/test_web.py`) — FastAPI TestClient over the state,
-  scan, state-change (incl. persistent-across-rescan), validation, and ServiceNow
-  endpoints.
+  parallelism (barrier), the single-item sequential fallback, and **per-item
+  failure isolation** (`resilient_map`).
+- **ServiceNow** (`tests/test_servicenow.py`) — JSON/CSV output **and the Table
+  API push path** (posts each record; a failing push doesn't abort the export).
+- **State store** (`tests/test_validation.py`) — atomic save round-trip, no temp
+  leftover, and crash-during-replace preserves the existing file.
+- **Vault** (`tests/test_vault.py`) — KV v1/v2 injection, override semantics, auth
+  errors, and the `Config.load` wiring (fake client).
+- **Web API** (`tests/test_web.py`) — FastAPI TestClient over state, scan,
+  state-change (persistent-across-rescan), validation, ServiceNow, and the
+  **API-token guard** (401 without, accepted via header/cookie, healthz open).
 
 All tests run offline with no Anthropic key. The AI stages are integration
-points validated by contract (schema) rather than live calls.
+points validated by contract (schema) rather than live calls. **CI**
+(`.github/workflows/ci.yml`) runs ruff + mypy + pytest on a 3.10–3.12 matrix and
+builds the image on every push/PR; `mypy` is a clean gate and the package ships
+`py.typed`.
 
 ---
 

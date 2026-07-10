@@ -412,6 +412,8 @@ Everything is environment-driven (no rebuild to reconfigure):
 | `CODESCAN_LIVE` | `false` | Scan Bitbucket/Snyk/Xray instead of the bundled fixtures (needs creds) |
 | `CODESCAN_PORT` | `8000` | Listen port |
 | `CODESCAN_CONFIG` / `CODESCAN_FIXTURES` | baked-in | Override the config / fixtures paths |
+| `CODESCAN_API_TOKEN` | — | If set, `/api/*` requires this token (defense-in-depth; see below) |
+| `CODESCAN_LOG_LEVEL` | `INFO` | Log verbosity (`DEBUG` adds per-task model routing) |
 | secrets | — | `ANTHROPIC_API_KEY`, `BITBUCKET_*`, `GITHUB_*`, `SNYK_*`, `XRAY_*`, `SERVICENOW_*` (see `.env.example`) |
 
 For a live, AI-enabled deployment set `CODESCAN_AI=true` and `CODESCAN_LIVE=true`,
@@ -450,8 +452,13 @@ docker compose -f docker-compose.prod.yml up -d --build
 **Operating it:**
 
 - **One replica.** Scan state is in memory — do not horizontally scale the web
-  server. Run it behind your **SSO / reverse proxy** (the UI has no built-in auth)
-  and terminate TLS there.
+  server. Run it behind your **SSO / reverse proxy** and terminate TLS there.
+- **API token (defense in depth).** Set `CODESCAN_API_TOKEN` and every `/api/*`
+  request must present it — via `Authorization: Bearer <token>`, an `X-API-Token`
+  header, or by visiting `/?token=<token>` once (which sets a cookie the browser
+  reuses). `/healthz` and the static page stay open. Unset = open (the SSO-fronted
+  default). This is a guard for accidental exposure, not a replacement for the
+  proxy.
 - **Persist `/data`.** The ServiceNow export, validation-state store, config
   overrides, and `threat_models.json` live there. The state store is what makes
   rescans idempotent (via `correlation_id`) and keeps analyst decisions from being

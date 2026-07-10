@@ -12,13 +12,15 @@ via POST /api/scan.
 
 from __future__ import annotations
 
+import hmac
 import json
+import os
 import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, Response
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 from .config import Config, TaskModel
@@ -30,6 +32,24 @@ from .servicenow import ServiceNowExporter, items_to_csv
 from .validation import StateStore
 
 STATIC = Path(__file__).parent / "static"
+
+# Optional API-token guard. When CODESCAN_API_TOKEN is set, every /api/* request
+# must present it (Authorization: Bearer, X-API-Token header, or the cookie the
+# index page sets from ?token=). Unset -> no auth (the "front it with SSO"
+# default). It's a defense-in-depth guard, not a replacement for a reverse proxy.
+_TOKEN_ENV = "CODESCAN_API_TOKEN"
+_TOKEN_COOKIE = "codescan_token"
+
+
+def _configured_token() -> str:
+    return os.environ.get(_TOKEN_ENV, "")
+
+
+def _request_token(request: Request) -> str:
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return auth[7:].strip()
+    return request.headers.get("X-API-Token") or request.cookies.get(_TOKEN_COOKIE) or ""
 
 # Surfaced to the config UI for dropdowns.
 KNOWN_MODELS = [
@@ -386,9 +406,25 @@ def create_app(
     state = AppState(config_path, fixtures, live, use_ai, offline, out_path, state_path, overrides_path)
     app = FastAPI(title="codescan", version="0.1.0")
 
+    @app.middleware("http")
+    async def _api_token_guard(request: Request, call_next):
+        token = _configured_token()
+        if token and request.url.path.startswith("/api/"):
+            provided = _request_token(request)
+            if not provided or not hmac.compare_digest(provided, token):
+                return JSONResponse({"detail": "unauthorized"}, status_code=401)
+        return await call_next(request)
+
     @app.get("/", response_class=HTMLResponse)
-    def index() -> str:
-        return (STATIC / "index.html").read_text(encoding="utf-8")
+    def index(token: str | None = None) -> Response:
+        # Serving the static shell is harmless (no data in it); the /api routes
+        # enforce the token. Visiting /?token=SECRET once sets a cookie so the
+        # browser's subsequent same-origin API calls carry it automatically.
+        resp = HTMLResponse((STATIC / "index.html").read_text(encoding="utf-8"))
+        configured = _configured_token()
+        if configured and token and hmac.compare_digest(token, configured):
+            resp.set_cookie(_TOKEN_COOKIE, token, httponly=True, samesite="strict")
+        return resp
 
     @app.get("/healthz")
     def healthz() -> dict:

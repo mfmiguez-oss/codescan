@@ -39,6 +39,37 @@ def test_healthz(tmp_path):
     assert r.json() == {"status": "ok"}
 
 
+def test_no_auth_by_default(tmp_path):
+    # CODESCAN_API_TOKEN unset -> API is open (the "behind SSO" default).
+    assert _client(tmp_path).get("/api/state").status_code == 200
+
+
+def test_api_token_guard(tmp_path, monkeypatch):
+    monkeypatch.setenv("CODESCAN_API_TOKEN", "s3cr3t")
+    client = _client(tmp_path)
+
+    # /api/* requires the token; healthz and the static shell stay open.
+    assert client.get("/api/state").status_code == 401
+    assert client.get("/healthz").status_code == 200
+    assert client.get("/").status_code == 200
+
+    # Accepted via Authorization: Bearer …
+    ok = client.get("/api/state", headers={"Authorization": "Bearer s3cr3t"})
+    assert ok.status_code == 200
+    # …and via X-API-Token; a wrong token is rejected.
+    assert client.get("/api/state", headers={"X-API-Token": "s3cr3t"}).status_code == 200
+    assert client.get("/api/state", headers={"X-API-Token": "nope"}).status_code == 401
+
+
+def test_browser_cookie_bootstrap(tmp_path, monkeypatch):
+    monkeypatch.setenv("CODESCAN_API_TOKEN", "s3cr3t")
+    client = _client(tmp_path)
+    # Visiting /?token=SECRET sets the cookie; the TestClient jar then carries it.
+    assert client.get("/", params={"token": "s3cr3t"}).status_code == 200
+    assert client.cookies.get("codescan_token") == "s3cr3t"
+    assert client.get("/api/state").status_code == 200
+
+
 def test_state_endpoint(tmp_path):
     r = _client(tmp_path).get("/api/state")
     assert r.status_code == 200
