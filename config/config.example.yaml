@@ -15,6 +15,13 @@ ai:
   # OpenHack) run independently — this many at once. Cuts wall-clock time on large
   # multi-repo scans; latency-only (same requests/cost). 1 = sequential.
   max_concurrency: 4
+  # Submit each AI stage's per-service requests via the Anthropic Message Batches
+  # API — ~50% cheaper, but asynchronous (the scan blocks polling for up to
+  # batch_max_wait_seconds). Best for scheduled/overnight runs. Fable and
+  # non-Anthropic tasks fall back to the synchronous path.
+  batch: false
+  batch_poll_seconds: 30
+  batch_max_wait_seconds: 3600
   # Silent adaptive model selection. When true, each AI call is nudged up or down an
   # Anthropic ladder (Haiku→Sonnet→Opus→Fable) from its configured tier by how hard
   # the work is: trivial groups downgrade (cheaper), KEV/critical/large groups

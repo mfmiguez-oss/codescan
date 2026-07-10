@@ -202,7 +202,7 @@ const children = [
     [2000, 3200, 4160]),
   P("The client omits effort / adaptive thinking for models that don't support them (Haiku) and enables server-side refusal fallbacks for Fable/Mythos (security tooling can trip false-positive classifier refusals; the request transparently re-serves on Opus 4.8). Config ai.tasks.<name> overrides any field per task. Adding a new AI stage is a one-liner."),
   P("Silent adaptive routing (ai.auto_route, off by default). When enabled, each AI call is nudged up or down an Anthropic capability ladder — Haiku -> Sonnet -> Opus -> Fable — relative to its configured tier, by a difficulty signal the calling stage computes (group_difficulty / size_difficulty): a single low-severity finding downgrades (cheaper), while a KEV / multi-critical / large group upgrades (stronger). It only shifts Anthropic ladder models — custom ids and other suppliers are untouched — and clamps at both ends. Enabling it is the operator's explicit opt-in; thereafter it applies silently per call."),
-  P("Bounded concurrency (ai.max_concurrency, default 4). The per-service AI calls (exploitability, threat modeling, enrichment, dedup) are independent, so the pipeline runs up to max_concurrency at once (concurrency.py, order-preserving map_workers) — compute in parallel, apply sequentially, so output stays deterministic. Latency-only (same requests, same cost), bounded to respect provider rate limits. Prompt caching is deliberately omitted: the static system prompts sit below the model's minimum cacheable-prefix size and payloads differ, so a cache breakpoint would never hit."),
+  P("Fan-out (complete_json_many). The judgement-heavy stages each build one request per repo/service and hand the list to LLMClient.complete_json_many, which owns the fan-out and returns {custom_id: result}. Two strategies: (a) bounded concurrency (ai.max_concurrency, default 4) via resilient_map — up to N at once, per-item failures isolated, deterministic apply order, latency-only (same requests/cost); or (b) Message Batches (ai.batch) — one Anthropic batch at ~50% token cost, asynchronous (the pipeline polls up to batch_max_wait_seconds), for scheduled runs. Fable (refusal fallbacks are rejected on Batches) and non-Anthropic requests fall back to concurrency, as does the whole set if submission errors. Prompt caching is deliberately omitted: the static system prompts sit below the model's minimum cacheable-prefix size and payloads differ."),
   H2("5.6 Composite scoring (scoring.py)"),
   P("A 0-100 blend of four weighted dimensions (weights configurable, normalized to sum to 1):"),
   table(
@@ -292,7 +292,7 @@ const children = [
   ...bullets([
     "Ingestion paginates all three sources; dedup/enrichment/scoring are O(n log n) in memory; EPSS lookups are batched (100 CVEs/request).",
     "LLM calls are the cost/latency driver but are bounded by service, not finding count — a repo with 500 findings is one exploitability call, not 500. Lower-cost routing keeps mechanical calls inexpensive.",
-    "Horizontal path: the per-service AI calls are embarrassingly parallel; batching or the Batches API is the natural next step for very large estates.",
+    "Horizontal path: the per-service AI calls are embarrassingly parallel — run concurrently (ai.max_concurrency) for latency, or via the Message Batches API (ai.batch) for ~50% cost on scheduled runs.",
   ]),
 
   H1("11. Known limitations & future work"),
@@ -302,7 +302,7 @@ const children = [
     "SCA-oriented fingerprint; SAST findings need path/line — a finding_kind discriminator would switch granularity.",
     "State store is a JSON file; a shared datastore is needed for concurrent runners / HA.",
     "Single-instance runtime — the web server holds scan state in memory, so it runs as one replica. The shipped Dockerfile / docker-compose.yml deploy a single non-root container that writes runtime artifacts to a /data volume, with secrets injected via environment. Horizontal scale needs the shared datastore above.",
-    "AI concurrency — per-service calls run with bounded parallelism (ai.max_concurrency); the Batches API would cut cost a further ~50% for non-latency-sensitive runs.",
+    "AI cost/latency — per-service calls run with bounded parallelism (ai.max_concurrency) or, for ~50% cost on scheduled runs, the Message Batches API (ai.batch); both via complete_json_many.",
     "ServiceNow field mapping targets a generic import; align it to each deployment's VR transform map.",
     "Web UI auth is a single shared token (CODESCAN_API_TOKEN), not per-user authn/z; front the dashboard with SSO for identity/RBAC.",
   ]),
@@ -313,6 +313,7 @@ const children = [
     "Model router (tests/test_llm_router.py) — pure resolution logic (Haiku default, fallback, override precedence, partial-override inheritance) plus auto-route (up/down ladder shift, end-clamping, custom-model and non-Anthropic passthrough).",
     "OpenHack engine (tests/test_openhack_engine.py) — file selection, dependency-dir skipping, min-confidence, and multi-pass union + cross-pass agreement with a stubbed LLM; connector tag-merge in test_openhack.py.",
     "Concurrency (tests/test_concurrency.py) — order preservation, genuine parallelism (barrier), single-item sequential fallback, and per-item failure isolation (resilient_map).",
+    "Batches API (tests/test_batch.py) — complete_json_many sync vs batch path, Fable/non-Anthropic exclusion, batch-error fallback to sync, and AnthropicProvider.complete_json_batch collection with a fake batches client.",
     "ServiceNow (tests/test_servicenow.py) — JSON/CSV output and the Table API push path (posts each record; a failing push doesn't abort the export).",
     "State store (tests/test_validation.py) — atomic save round-trip, no temp leftover, crash-during-replace preserves the existing file.",
     "Vault (tests/test_vault.py) — KV v1/v2 injection, override semantics, auth errors, and the Config.load wiring.",

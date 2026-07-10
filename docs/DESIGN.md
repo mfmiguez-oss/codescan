@@ -310,13 +310,22 @@ ladder — a custom model id or another supplier is left exactly as configured �
 clamps at both ends. Enabling it is the operator's explicit opt-in; thereafter it
 applies silently per call (`auto_route` in `llm.py`).
 
-**Bounded concurrency (`ai.max_concurrency`, default 4).** The judgement-heavy
-stages issue one request per repo/service; those requests are independent, so the
-pipeline runs up to `max_concurrency` of them at once (`concurrency.py`,
-order-preserving `map_workers`) — compute in parallel, apply sequentially, so
-output stays deterministic. It's a latency optimization only (same requests, same
-cost) and is bounded to stay within provider rate limits. Applies to
-exploitability, threat modeling, AI enrichment, and semantic dedup.
+**Fan-out (`complete_json_many`).** The judgement-heavy stages (exploitability,
+threat modeling, AI enrichment, semantic dedup) each build one request per
+repo/service and hand the list to `LLMClient.complete_json_many`, which owns the
+fan-out and returns `{custom_id: result}`. Centralizing this keeps the stages
+declarative and gives one place to choose the execution strategy:
+
+- **Bounded concurrency (`ai.max_concurrency`, default 4, the default).** Runs the
+  requests through `resilient_map` (`concurrency.py`) — up to N at once, per-item
+  failures isolated (logged and skipped), results applied in deterministic order.
+  Latency-only: same requests, same cost, bounded to respect rate limits.
+- **Message Batches (`ai.batch`).** Submits the requests as one Anthropic batch
+  (`AnthropicProvider.complete_json_batch`) at **~50% token cost**. Asynchronous —
+  the pipeline polls up to `batch_max_wait_seconds` — so it's for scheduled runs,
+  not interactive. Fable (its refusal fallbacks are rejected on Batches) and
+  non-Anthropic-routed requests fall back to the concurrent path, as does the whole
+  set if submission errors, so enabling batch never fails a run.
 
 **No prompt caching (deliberate).** The static system prompts sit far below the
 model's minimum cacheable-prefix size and each request's payload differs, so a
@@ -578,9 +587,9 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   (one exploitability call per repo, dedup calls per repo+component cluster),
   not by total finding count — a repo with 500 findings is one exploitability
   call, not 500. Lower-cost routing keeps the mechanical calls inexpensive.
-- **Horizontal scale** path: the per-service AI calls are embarrassingly
-  parallel; batching or the Batches API is the natural next step for very large
-  estates (§11).
+- **Horizontal scale** path: the per-service AI calls are embarrassingly parallel
+  — run concurrently (`ai.max_concurrency`) for latency, or via the Message
+  Batches API (`ai.batch`) for ~50% cost on scheduled runs (§5.5).
 
 ---
 
@@ -601,9 +610,10 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   single non-root container that writes runtime artifacts to a `/data` volume;
   secrets are injected via environment). Horizontal scale needs the shared
   datastore above.
-- **AI concurrency.** Per-service calls now run with bounded parallelism
-  (`ai.max_concurrency`, §5.5); moving to the Batches API would cut cost a further
-  ~50% for non-latency-sensitive runs.
+- **AI cost/latency.** Per-service calls run with bounded parallelism
+  (`ai.max_concurrency`) or, for ~50% cost on scheduled runs, the Message Batches
+  API (`ai.batch`) — both via `complete_json_many` (§5.5). A shared prompt-cache
+  layer isn't warranted (prompts are below the min cacheable prefix).
 - **ServiceNow field mapping** targets a generic `sn_vul_vulnerable_item` import;
   it must be aligned to each deployment's VR transform map.
 - **Web UI auth is a single shared token, not full authn/z.** `CODESCAN_API_TOKEN`
@@ -650,7 +660,8 @@ builds the image on every push/PR; `mypy` is a clean gate and the package ships
 `config/config.example.yaml` (secrets via `${ENV}`):
 
 - `ai` — default tier + per-task routing (`tasks.<name>`), plus `max_concurrency`
-  (bounded parallelism) and `auto_route` (silent adaptive tier selection).
+  (bounded parallelism), `auto_route` (silent adaptive tier selection), and `batch`
+  (Message Batches API, ~50% cost, async).
 - `source` / `bitbucket` / `github` — repo inventory (scan surface), tokens, scoping, TLS.
 - `snyk` / `xray` — findings endpoints, tokens, TLS.
 - `openhack` — whitebox review: `enabled`/`findings_dir` (ingest), `auto`/`clone`/

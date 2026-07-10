@@ -59,6 +59,14 @@ class AIConfig(_StrictModel):
     # the operator's explicit opt-in. Only shifts Anthropic models on the ladder;
     # custom models and other suppliers are left exactly as configured.
     auto_route: bool = False
+    # Submit each AI stage's per-service requests via the Anthropic Message
+    # Batches API — ~50% cheaper, but asynchronous (the scan blocks polling for up
+    # to batch_max_wait_seconds). Best for scheduled/overnight runs, not interactive
+    # use. Off = the synchronous concurrent path. Fable (needs refusal fallbacks,
+    # which Batches rejects) and non-Anthropic tasks fall back to synchronous.
+    batch: bool = False
+    batch_poll_seconds: int = 30
+    batch_max_wait_seconds: int = 3600
     # Route individual tasks to lower-cost or higher-capability models,
     # e.g. dedup -> Haiku, exploitability -> Opus/Fable. Built-in defaults live
     # in llm.py.

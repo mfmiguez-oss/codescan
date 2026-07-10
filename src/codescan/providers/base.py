@@ -30,9 +30,23 @@ class CompletionRequest:
 
 class LLMProvider:
     name = "base"
+    supports_batch = False
 
     def complete_json(self, req: CompletionRequest) -> dict:  # pragma: no cover - interface
         raise NotImplementedError
+
+    def complete_json_batch(
+        self,
+        requests: list[tuple[str, CompletionRequest]],
+        *,
+        poll_seconds: int = 30,
+        max_wait_seconds: int = 3600,
+    ) -> dict[str, dict]:  # pragma: no cover - interface
+        """Run many requests as one async batch; return {custom_id: parsed_json}.
+
+        Only providers with `supports_batch = True` implement this.
+        """
+        raise NotImplementedError(f"{self.name} provider has no Batches API support")
 
 
 def build_json_instruction(req: CompletionRequest) -> str:

@@ -19,6 +19,13 @@ class FakeLLM:
         self.calls.append(task)
         return self.payload
 
+    def complete_json_many(self, task, items, schema):
+        # Mirror LLMClient's sync fan-out: one result per item, keyed by custom_id.
+        return {
+            it.custom_id: self.complete_json(task, it.system, it.user, schema)
+            for it in items
+        }
+
 
 def _finding(repo: str) -> Finding:
     return Finding(

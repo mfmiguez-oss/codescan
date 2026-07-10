@@ -88,6 +88,7 @@ def sanitized_config(cfg: Config) -> dict:
             "max_tokens": cfg.ai.max_tokens,
             "max_concurrency": cfg.ai.max_concurrency,
             "auto_route": cfg.ai.auto_route,
+            "batch": cfg.ai.batch,
             "tasks": {
                 name: {
                     "provider": (t.provider or ""),
@@ -166,6 +167,8 @@ def apply_config(cfg: Config, update: dict) -> None:
         cfg.ai.max_concurrency = max(1, int(ai["max_concurrency"]))
     if "auto_route" in ai:
         cfg.ai.auto_route = bool(ai["auto_route"])
+    if "batch" in ai:
+        cfg.ai.batch = bool(ai["batch"])
     if "tasks" in ai:
         for name, t in ai["tasks"].items():
             spec = TaskModel(

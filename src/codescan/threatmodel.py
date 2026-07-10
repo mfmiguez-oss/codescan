@@ -16,8 +16,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 
-from .concurrency import resilient_map, workers_of
-from .llm import LLMClient
+from .llm import BatchItem, LLMClient
 from .models import Asset, EntryPoint, Finding, Severity, Stride, Threat, ThreatModel, finding_component_label, group_difficulty, group_findings_by_repo
 
 _STRIDE = [s.value for s in Stride]
@@ -119,35 +118,27 @@ class ThreatModelEngine:
     def build(self, findings: list[Finding], chains: list[dict]) -> list[ThreatModel]:
         by_repo = group_findings_by_repo(findings)
 
-        def build_repo(item: tuple[str, list[Finding]]) -> ThreatModel:
-            repo, group = item
-            repo_fids = {f.id for f in group}
-            repo_chains = [
-                c for c in chains
-                if any(fid in repo_fids for fid in c.get("finding_ids", []))
-            ]
-            return self._build_one(repo, group, repo_chains)
+        # One deep-tier request per service (concurrent, or one batch).
+        items = [
+            BatchItem(custom_id=repo, system=_SYSTEM, user=self._user(repo, group, chains),
+                      difficulty=group_difficulty(group))
+            for repo, group in by_repo.items()
+        ]
+        results = self.llm.complete_json_many(self.TASK, items, _SCHEMA)
+        return [self._parse(repo, results[repo]) for repo in by_repo if repo in results]
 
-        # One deep-tier call per service; independent, so run them concurrently
-        # (order preserved). A failing service is logged and skipped, not fatal.
-        models, _ = resilient_map(
-            build_repo, list(by_repo.items()), workers_of(self.llm),
-            describe=lambda item: item[0],
-        )
-        return models
-
-    def _build_one(self, repo: str, group: list[Finding], chains: list[dict]) -> ThreatModel:
+    @staticmethod
+    def _user(repo: str, group: list[Finding], chains: list[dict]) -> str:
+        repo_fids = {f.id for f in group}
+        repo_chains = [
+            c for c in chains if any(fid in repo_fids for fid in c.get("finding_ids", []))
+        ]
         payload = {
             "service": repo,
             "findings": [_finding_digest(f) for f in group],
-            "attack_chains": chains,
+            "attack_chains": repo_chains,
         }
-        user = ("Build a STRIDE threat model for this service.\n\n"
-                + json.dumps(payload, indent=2))
-        result = self.llm.complete_json(
-            self.TASK, _SYSTEM, user, _SCHEMA, difficulty=group_difficulty(group)
-        )
-        return self._parse(repo, result)
+        return "Build a STRIDE threat model for this service.\n\n" + json.dumps(payload, indent=2)
 
     @staticmethod
     def _parse(repo: str, r: dict) -> ThreatModel:

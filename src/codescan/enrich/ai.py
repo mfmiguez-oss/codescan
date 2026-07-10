@@ -12,8 +12,7 @@ from __future__ import annotations
 
 import json
 
-from ..concurrency import resilient_map, workers_of
-from ..llm import LLMClient
+from ..llm import BatchItem, LLMClient
 from ..models import Finding, finding_component_label, group_difficulty, group_findings_by_repo
 from .base import BaseEnricher
 
@@ -71,22 +70,18 @@ class AIEnricher(BaseEnricher):
     def enrich(self, findings: list[Finding]) -> None:
         by_repo = group_findings_by_repo(findings)
         by_id = {f.id: f for f in findings}
-        # Query per-repo groups concurrently, then apply in order; a failing repo
-        # is logged and skipped (enrichment is best-effort, not load-bearing).
-        results, _ = resilient_map(
-            lambda item: self._ask(item[0], item[1]),
-            list(by_repo.items()),
-            workers_of(self.llm),
-            describe=lambda item: item[0],
-        )
-        for result in results:
+        # One request per repo (concurrent, or one batch); enrichment is
+        # best-effort, so an absent result just leaves that repo un-enriched.
+        items = [
+            BatchItem(
+                custom_id=repo, system=_SYSTEM,
+                user=f"Service: {repo}\n\n" + json.dumps([_digest(f) for f in group], indent=2),
+                difficulty=group_difficulty(group),
+            )
+            for repo, group in by_repo.items()
+        ]
+        for result in self.llm.complete_json_many("enrichment", items, _SCHEMA).values():
             self._apply(result, by_id)
-
-    def _ask(self, repo: str, group: list[Finding]) -> dict:
-        user = f"Service: {repo}\n\n" + json.dumps([_digest(f) for f in group], indent=2)
-        return self.llm.complete_json(
-            "enrichment", _SYSTEM, user, _SCHEMA, difficulty=group_difficulty(group)
-        )
 
     def _apply(self, result: dict, by_id: dict[str, Finding]) -> None:
         for it in result.get("items", []):

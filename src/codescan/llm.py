@@ -11,11 +11,22 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, replace
+from typing import NamedTuple
 
+from .concurrency import resilient_map
 from .config import AIConfig
 from .providers import CompletionRequest, get_provider
 
 logger = logging.getLogger(__name__)
+
+
+class BatchItem(NamedTuple):
+    """One structured-output request in a fan-out (`complete_json_many`)."""
+
+    custom_id: str          # caller's key for the result (any string)
+    system: str
+    user: str
+    difficulty: str | None = None   # auto-route hint
 
 
 @dataclass(frozen=True)
@@ -108,3 +119,68 @@ class LLMClient:
             effort=spec.effort, max_tokens=spec.max_tokens,
         )
         return provider.complete_json(req)
+
+    def complete_json_many(
+        self, task: str, items: list[BatchItem], schema: dict
+    ) -> dict[str, dict]:
+        """Run many structured-output requests for `task`; return {custom_id: json}.
+
+        Two execution modes, transparent to callers:
+          * default — run concurrently (bounded), isolating per-item failures;
+          * ``ai.batch`` — submit as one Anthropic Message Batch (~50% cost, async).
+
+        In batch mode, items that can't batch (Fable — needs refusal fallbacks the
+        Batches API rejects — or a non-Anthropic supplier) fall back to the
+        synchronous path, as does the whole set if batch submission errors. A
+        failed/absent item is simply omitted from the result (callers skip it).
+        """
+        items = list(items)
+        if not items:
+            return {}
+        if self.router.cfg.batch:
+            return self._many_batched(task, items, schema)
+        return self._many_sync(task, items, schema)
+
+    def _many_sync(self, task: str, items: list[BatchItem], schema: dict) -> dict[str, dict]:
+        pairs, _failed = resilient_map(
+            lambda it: (it.custom_id, self.complete_json(
+                task, it.system, it.user, schema, difficulty=it.difficulty)),
+            items, self.max_workers, describe=lambda it: it.custom_id,
+        )
+        return dict(pairs)
+
+    def _many_batched(self, task: str, items: list[BatchItem], schema: dict) -> dict[str, dict]:
+        results: dict[str, dict] = {}
+        batch: list[tuple[BatchItem, ModelSpec]] = []
+        sync: list[BatchItem] = []
+        for it in items:
+            spec = self.router.resolve(task, it.difficulty)
+            if spec.provider == "anthropic" and not spec.model.startswith(("claude-fable", "claude-mythos")):
+                batch.append((it, spec))
+            else:
+                sync.append(it)   # Fable (needs fallbacks) / other supplier -> sync
+
+        if batch:
+            # custom_id must be [A-Za-z0-9_-]; map safe ids <-> caller keys.
+            id_map = {f"b{i}": it.custom_id for i, (it, _s) in enumerate(batch)}
+            reqs = [
+                (f"b{i}", CompletionRequest(
+                    model=spec.model, system=it.system, user=it.user, schema=schema,
+                    effort=spec.effort, max_tokens=spec.max_tokens))
+                for i, (it, spec) in enumerate(batch)
+            ]
+            try:
+                raw = get_provider("anthropic").complete_json_batch(
+                    reqs,
+                    poll_seconds=self.router.cfg.batch_poll_seconds,
+                    max_wait_seconds=self.router.cfg.batch_max_wait_seconds,
+                )
+                for safe_id, result in raw.items():
+                    results[id_map[safe_id]] = result
+            except Exception as exc:  # noqa: BLE001 - degrade to synchronous
+                logger.error("batch failed (%s); running %d items synchronously", exc, len(batch))
+                sync.extend(it for it, _s in batch)
+
+        if sync:
+            results.update(self._many_sync(task, sync, schema))
+        return results

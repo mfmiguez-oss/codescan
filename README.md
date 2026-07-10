@@ -174,6 +174,22 @@ The pipeline is I/O-bound on model API calls, and each judgement-heavy stage
   ai:
     auto_route: true          # silent per-call downgrade/upgrade by difficulty
   ```
+- **Batch API (~50% off, async).** Set `ai.batch` and each AI stage submits its
+  per-service requests through the Anthropic **Message Batches API** — half the
+  token price — instead of live calls. It's **asynchronous**: the scan blocks
+  polling for the batch to finish (up to `ai.batch_max_wait_seconds`, default 1h),
+  so it's for **scheduled/overnight runs**, not interactive triage. Fable (its
+  refusal fallbacks aren't allowed on Batches) and non-Anthropic-routed tasks fall
+  back to the synchronous path automatically, as does the whole set if a batch
+  submission errors — so enabling it never breaks a run.
+
+  ```yaml
+  ai:
+    batch: true               # ~50% cheaper AI stages, asynchronous
+  ```
+
+Concurrency and batch are the two speed/cost ends of the same dial: `max_concurrency`
+minimizes wall-clock at full price; `batch` minimizes price at the cost of latency.
 
 Prompt caching isn't used: the static system prompts are far below the model's
 minimum cacheable-prefix size and each request's payload differs, so a cache

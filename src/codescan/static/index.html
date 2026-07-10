@@ -570,6 +570,7 @@ function renderConfig() {
       <div class="formrow"><label>Max tokens</label><input type="number" id="ai-max" value="${c.ai.max_tokens}"/></div>
       <div class="formrow"><label>Max concurrency</label><input type="number" id="ai-conc" style="width:100px" value="${c.ai.max_concurrency ?? 4}"/> <span class="muted" style="font-size:12px">parallel per-service AI calls (latency only)</span></div>
       <div class="formrow"><label>Auto-route models</label><input type="checkbox" id="ai-auto" ${c.ai.auto_route ? 'checked' : ''}/> <span class="muted" style="font-size:12px">silently pick cheaper/stronger tier per call by difficulty (Haiku↔Sonnet↔Opus↔Fable)</span></div>
+      <div class="formrow"><label>Batch API</label><input type="checkbox" id="ai-batch" ${c.ai.batch ? 'checked' : ''}/> <span class="muted" style="font-size:12px">Anthropic Batches API — ~50% cheaper, asynchronous (for scheduled runs)</span></div>
     </div>
     <div class="card">
       <h4>Model routing by task</h4>
@@ -647,7 +648,7 @@ async function saveConfig() {
     tasks[t] = { provider: $('#task-' + t + '-provider').value, model: $('#task-' + t + '-model').value, effort: $('#task-' + t + '-effort').value, max_tokens: numOrNull('task-' + t + '-max') };
   });
   const update = {
-    ai: { provider: $('#ai-provider').value, model: $('#ai-model').value, effort: $('#ai-effort').value, max_tokens: Number($('#ai-max').value), max_concurrency: Number($('#ai-conc').value), auto_route: $('#ai-auto').checked, tasks },
+    ai: { provider: $('#ai-provider').value, model: $('#ai-model').value, effort: $('#ai-effort').value, max_tokens: Number($('#ai-max').value), max_concurrency: Number($('#ai-conc').value), auto_route: $('#ai-auto').checked, batch: $('#ai-batch').checked, tasks },
     enrichment: { kev_enabled: $('#en-kev').checked, epss_enabled: $('#en-epss').checked, reachability_enabled: $('#en-reach').checked, ai_enabled: $('#en-ai').checked },
     threat_model: { enabled: $('#tm-enabled').checked },
     openhack: { enabled: $('#oh-enabled').checked, findings_dir: $('#oh-dir').value, repo: $('#oh-repo').value, auto: $('#oh-auto').checked, command: $('#oh-cmd').value, workspace: $('#oh-ws').value, clone: $('#oh-clone').checked, passes: Number($('#oh-passes').value), max_files: Number($('#oh-maxfiles').value), min_confidence: $('#oh-minconf').value },
