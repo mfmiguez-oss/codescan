@@ -53,6 +53,18 @@ def test_default_provider_propagates():
     assert spec.provider == "google" and spec.model == "gemini-2.5-pro"
 
 
+def test_override_layers_on_task_baseline():
+    # Per-pass supplier override (openhack.pass_models) — unset fields inherit.
+    router = ModelRouter(AIConfig(model="claude-opus-4-8", effort="high"))
+    full = router.override("openhack", TaskModel(provider="openai", model="gpt-5"))
+    assert (full.provider, full.model, full.effort) == ("openai", "gpt-5", "high")
+
+    partial = router.override("openhack", TaskModel(effort="low"))
+    assert partial.provider == "anthropic"          # inherited from the baseline
+    assert partial.model == "claude-opus-4-8"
+    assert partial.effort == "low"                   # overridden
+
+
 def test_partial_override_inherits_default():
     cfg = AIConfig(model="claude-opus-4-8", effort="high",
                    tasks={"dedup": TaskModel(effort="medium")})

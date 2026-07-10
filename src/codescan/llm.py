@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 from typing import NamedTuple
 
 from .concurrency import resilient_map
-from .config import AIConfig
+from .config import AIConfig, TaskModel
 from .providers import CompletionRequest, get_provider
 
 logger = logging.getLogger(__name__)
@@ -92,6 +92,17 @@ class ModelRouter:
             spec = auto_route(spec, difficulty)
         return spec
 
+    def override(self, task: str, task_model: TaskModel) -> ModelSpec:
+        """A task's baseline spec with a per-call override layered on (unset fields
+        inherit the baseline). Used to route each OpenHack pass to its own supplier."""
+        base = self.resolve(task)
+        return ModelSpec(
+            task_model.provider or base.provider,
+            task_model.model or base.model,
+            task_model.effort or base.effort,
+            task_model.max_tokens or base.max_tokens,
+        )
+
 
 class LLMClient:
     """Runs a structured-output request for a task through the routed provider."""
@@ -107,10 +118,16 @@ class LLMClient:
     def spec_for(self, task: str) -> ModelSpec:
         return self.router.resolve(task)
 
+    def resolve_spec(self, task: str, override: TaskModel | None = None) -> ModelSpec:
+        """Routed spec for a task, or the task baseline with `override` layered on."""
+        return self.router.override(task, override) if override else self.router.resolve(task)
+
     def complete_json(
-        self, task: str, system: str, user: str, schema: dict, *, difficulty: str | None = None
+        self, task: str, system: str, user: str, schema: dict, *,
+        difficulty: str | None = None, spec: ModelSpec | None = None,
     ) -> dict:
-        spec = self.router.resolve(task, difficulty)
+        # An explicit `spec` (e.g. a per-pass supplier override) wins over routing.
+        spec = spec or self.router.resolve(task, difficulty)
         logger.debug("task=%s -> %s/%s (effort=%s, difficulty=%s)",
                      task, spec.provider, spec.model, spec.effort, difficulty or "-")
         provider = get_provider(spec.provider)

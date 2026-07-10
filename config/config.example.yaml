@@ -102,6 +102,16 @@ openhack:
   # ai.tasks.openhack (defaults to the deep default tier).
   passes: 2              # independent review passes; >=2 unions findings (higher
                          # recall) and flags cross-pass agreement. 1 = single pass.
+  # Route each pass to a different supplier/model so the passes are genuinely
+  # independent — diverse vendors miss different things, so the union catches more
+  # and a cross-supplier agreement (multi-supplier tag) is a stronger signal.
+  # Pass i uses pass_models[i % len]; unset fields inherit the openhack task tier.
+  # Empty = every pass uses the same routed model. A pass whose supplier has no key
+  # is skipped, not fatal. Needs the extra suppliers installed: pip install -e ".[providers]".
+  pass_models: []
+    # - { provider: anthropic, model: claude-opus-4-8 }
+    # - { provider: openai,    model: gpt-5 }
+    # - { provider: google,    model: gemini-2.5-pro }
   max_files: 60          # cap source files reviewed per repo
   max_file_bytes: 60000  # skip files larger than this
   min_confidence: low    # drop candidates below this confidence: low | medium | high

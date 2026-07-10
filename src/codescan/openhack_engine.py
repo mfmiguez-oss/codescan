@@ -24,11 +24,13 @@ to keep each request tractable.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 from .config import OpenHackConfig
-from .llm import LLMClient
-from .models import size_difficulty
+from .llm import LLMClient, ModelSpec
+
+logger = logging.getLogger(__name__)
 
 # Source extensions worth a security review. Kept broad but bounded; anything not
 # listed (assets, lockfiles, binaries) is skipped so batches stay code-dense.
@@ -140,10 +142,16 @@ class OpenHackEngine:
 
         Runs `cfg.passes` independent review passes (default 2) and **unions** the
         results: because AI source review is non-deterministic, a single pass can
-        miss real issues, so multiple passes raise recall. Duplicate findings across
-        passes are consolidated (keyed on path + class + title), keeping the highest
-        severity/confidence seen and recording how many passes agreed — a confidence
-        signal surfaced as a `corroborated` tag and a note in the finding.
+        miss real issues, so multiple passes raise recall. With `cfg.pass_models`,
+        each pass runs on a different supplier/model — diverse vendors miss
+        different things, so the union is broader and cross-supplier agreement is a
+        stronger signal. Duplicate findings across passes are consolidated (keyed on
+        path + class + title), keeping the highest severity/confidence seen and
+        recording how many passes (and which suppliers) agreed — surfaced as
+        `corroborated` / `multi-supplier` tags and a note in the finding.
+
+        A pass that fails (e.g. a supplier without a configured key) is logged and
+        skipped; the union still benefits from the passes that succeeded.
 
         Returns the output directory (the same one passed in), so callers can hand
         it straight to `OpenHackConnector.from_dir`.
@@ -156,13 +164,24 @@ class OpenHackEngine:
         files = self._select_files(root)
         passes = max(1, self.cfg.passes)
         consolidated: dict[tuple[str, str, str], dict] = {}
-        for _ in range(passes):
-            for batch in self._batches(files, root):
-                result = self._review_batch(batch, repo or root.name)
-                for finding in result.get("findings", []):
-                    self._merge(consolidated, finding)
+        for pass_idx in range(passes):
+            spec = self._pass_spec(pass_idx)
+            try:
+                for batch in self._batches(files, root):
+                    result = self._review_batch(batch, repo or root.name, spec)
+                    for finding in result.get("findings", []):
+                        self._merge(consolidated, finding, spec.provider)
+            except Exception as exc:  # noqa: BLE001 - isolate a failing pass/supplier
+                logger.warning("OpenHack pass %d (%s/%s) failed: %s",
+                               pass_idx + 1, spec.provider, spec.model, exc)
         self._write_candidates(fc_dir, consolidated, passes)
         return str(out)
+
+    def _pass_spec(self, pass_idx: int):
+        """Resolve the supplier/model for pass `pass_idx` (cycles `pass_models`)."""
+        overrides = self.cfg.pass_models
+        override = overrides[pass_idx % len(overrides)] if overrides else None
+        return self.llm.resolve_spec(self.TASK, override)
 
     # --- file selection ---------------------------------------------------
     def _select_files(self, root: Path) -> list[Path]:
@@ -215,7 +234,7 @@ class OpenHackEngine:
             yield batch
 
     # --- one LLM review pass ---------------------------------------------
-    def _review_batch(self, batch: list[tuple[str, str]], repo: str) -> dict:
+    def _review_batch(self, batch: list[tuple[str, str]], repo: str, spec: ModelSpec) -> dict:
         blocks = [
             f"=== FILE: {rel} ===\n{text}" for rel, text in batch
         ]
@@ -225,20 +244,17 @@ class OpenHackEngine:
             f"security vulnerabilities present in this code.\n\n"
             + "\n\n".join(blocks)
         )
-        # Larger batches (more files / more surface) get a stronger model when
-        # auto_route is on; a one- or two-file batch a cheaper one.
-        return self.llm.complete_json(
-            self.TASK, _SYSTEM, user, _SCHEMA, difficulty=size_difficulty(len(batch)),
-        )
+        # `spec` pins this pass to its configured supplier/model.
+        return self.llm.complete_json(self.TASK, _SYSTEM, user, _SCHEMA, spec=spec)
 
     # --- cross-pass consolidation ----------------------------------------
-    def _merge(self, acc: dict[tuple[str, str, str], dict], f: dict) -> None:
+    def _merge(self, acc: dict[tuple[str, str, str], dict], f: dict, provider: str) -> None:
         """Fold one raw finding into the consolidation map, keyed on identity.
 
         Same weakness in the same file (path + vulnerability class + title) reported
         across passes collapses into one entry; distinct titles stay separate (union
-        favors recall). Keeps the strongest severity/confidence seen and counts how
-        many passes reported it.
+        favors recall). Keeps the strongest severity/confidence seen and records how
+        many passes — and which suppliers — reported it.
         """
         path = f.get("target_path", "") or ""
         vclass = (f.get("primary_vulnerability_class") or "unknown")
@@ -246,9 +262,10 @@ class OpenHackEngine:
         key = (path, vclass.lower(), title.strip().lower())
         cur = acc.get(key)
         if cur is None:
-            acc[key] = {"finding": dict(f), "passes": 1}
+            acc[key] = {"finding": dict(f), "passes": 1, "providers": {provider}}
             return
         cur["passes"] += 1
+        cur["providers"].add(provider)
         best = cur["finding"]
         if _SEV_RANK.get((f.get("severity") or "").lower(), 0) > _SEV_RANK.get((best.get("severity") or "").lower(), 0):
             best["severity"] = f.get("severity")
@@ -269,13 +286,17 @@ class OpenHackEngine:
             candidate_id = f"OH-{n:04d}"
             vclass = f.get("primary_vulnerability_class", "") or "unknown"
             summary = f.get("summary", "")
+            providers = sorted(entry.get("providers", set()))
             tags = ["openhack"]
             if passes > 1:
+                supplier_note = f" (suppliers: {', '.join(providers)})" if len(providers) > 1 else ""
                 summary = (
                     f"{summary}\n\nReview agreement: identified in {found} of {passes} "
-                    "independent whitebox review passes."
+                    f"independent whitebox review passes{supplier_note}."
                 ).strip()
                 tags.append("corroborated" if found >= 2 else "single-pass")
+                if len(providers) >= 2:
+                    tags.append("multi-supplier")
             envelope = {
                 "candidate_id": candidate_id,
                 "expert": vclass,

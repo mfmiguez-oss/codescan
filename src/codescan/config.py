@@ -137,6 +137,16 @@ class OpenHackConfig(_StrictModel):
     # vulnerabilities missed) and flags cross-pass agreement as a confidence signal.
     # 1 = single pass (cheapest); 2+ recommended. Each pass is another set of calls.
     passes: int = 2
+    # Route each pass to a different supplier/model for independent coverage —
+    # different vendors miss different things, so diverse passes catch more and a
+    # cross-supplier agreement is a stronger confidence signal. Pass i uses
+    # pass_models[i % len]; unset fields inherit the `openhack` task routing. Empty
+    # = every pass uses the same routed model. e.g.:
+    #   pass_models:
+    #     - { provider: anthropic, model: claude-opus-4-8 }
+    #     - { provider: openai,    model: gpt-5 }
+    #     - { provider: google,    model: gemini-2.5-pro }
+    pass_models: list[TaskModel] = []
     max_files: int = 60         # cap source files reviewed per repo (cost/latency)
     max_file_bytes: int = 60000  # skip files larger than this (bytes)
     batch_chars: int = 48000    # per-request source budget (chars) across files

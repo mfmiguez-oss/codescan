@@ -390,6 +390,24 @@ agreement is a **confidence signal**: a finding seen in every pass is tagged
 in 2 of 2 … passes") is noted on the finding. Set `passes: 1` for a single cheap
 pass; each extra pass is another set of model calls, so it trades cost for recall.
 
+**Different suppliers per pass (stronger independence).** Because different vendors
+have different blind spots, you can route each pass to a **different supplier/model**
+via `openhack.pass_models` — the passes then disagree in useful ways, so the union
+is broader and agreement is more meaningful. A finding confirmed by two different
+suppliers is tagged **`multi-supplier`** (and the note names them), the strongest
+confidence a review can carry. Pass *i* uses `pass_models[i % len]` (cycling), unset
+fields inherit the `openhack` tier, and a pass whose supplier has no key is skipped
+(not fatal), so the union still benefits from the rest:
+
+```yaml
+openhack:
+  passes: 3
+  pass_models:
+    - { provider: anthropic, model: claude-opus-4-8 }
+    - { provider: openai,    model: gpt-5 }
+    - { provider: google,    model: gemini-2.5-pro }
+```
+
 **Auto-run — external OpenHack.** To use a separate OpenHack install instead, set
 `command` to your invocation; `{repo_path}` / `{output_dir}` are substituted and
 the AI-provider env vars pass through to the subprocess:

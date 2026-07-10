@@ -193,8 +193,16 @@ passes miss fewer. Duplicates across passes are consolidated on
 (file, vulnerability class, title), keeping the strongest severity/confidence seen
 and recording cross-pass agreement: a finding seen in every pass is tagged
 `corroborated`, one seen once `single-pass`, with an "identified in N of M passes"
-note — a confidence signal that survives to the `Finding`. Fixtures under
-`fixtures/` drive the default UI and the test suite.
+note — a confidence signal that survives to the `Finding`.
+
+**Different suppliers per pass.** `openhack.pass_models` routes each pass to its own
+supplier/model (pass *i* → `pass_models[i % len]`, unset fields inheriting the
+`openhack` tier, via `LLMClient.resolve_spec` / `ModelRouter.override`). Different
+vendors have different blind spots, so diverse passes make the union broader and the
+agreement more meaningful — a finding confirmed by ≥2 suppliers earns a
+`multi-supplier` tag. Each pass is isolated: a supplier without a configured key is
+logged and skipped, and the union still benefits from the passes that ran. Fixtures
+under `fixtures/` drive the default UI and the test suite.
 
 **Repo source is pluggable.** The repo inventory comes from either Bitbucket
 Data Center (`bitbucket.py`) or GitHub / GitHub Enterprise Server (`github.py`),
@@ -665,8 +673,8 @@ builds the image on every push/PR; `mypy` is a clean gate and the package ships
 - `source` / `bitbucket` / `github` — repo inventory (scan surface), tokens, scoping, TLS.
 - `snyk` / `xray` — findings endpoints, tokens, TLS.
 - `openhack` — whitebox review: `enabled`/`findings_dir` (ingest), `auto`/`clone`/
-  `command` (run), and built-in-engine tuning (`passes`, `max_files`,
-  `max_file_bytes`, `min_confidence`).
+  `command` (run), and built-in-engine tuning (`passes`, `pass_models` for
+  per-pass suppliers, `max_files`, `max_file_bytes`, `min_confidence`).
 - `servicenow` — instance, credentials, `push` toggle, import table, `format`.
 - `enrichment` — KEV/EPSS feed URLs + per-enricher toggles.
 - `threat_model` — `enabled`.
