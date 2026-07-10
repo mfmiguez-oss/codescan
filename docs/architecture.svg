@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 660" width="2000" height="1320" role="img" font-family="Segoe UI, Roboto, system-ui, sans-serif">
   <title>codescan architecture</title>
-  <desc>Bitbucket, Snyk, Xray and a built-in multi-pass OpenHack whitebox engine feed a pipeline that ingests, deduplicates (deterministic then AI/Haiku), enriches with KEV/EPSS/reachability, runs AI exploitability and attack-chain analysis (Opus/Fable), scores, and assigns validation states, then exports to ServiceNow VR and a web UI, with a persistent state store feeding back. AI stages run concurrently and can auto-route their model tier by difficulty.</desc>
+  <desc>Bitbucket, Snyk, Xray and a built-in multi-pass OpenHack whitebox engine feed a pipeline that ingests, deduplicates (deterministic then AI/Haiku), enriches with KEV/EPSS/reachability, runs AI exploitability and attack-chain analysis (Opus/Fable), scores, and assigns validation states, then exports to ServiceNow VR and a web UI, with a persistent state store feeding back. AI stages run concurrently (or via the Message Batches API for ~50% cost) and can auto-route their model tier by difficulty.</desc>
 
   <rect x="0" y="0" width="1000" height="660" fill="#ffffff"/>
 
@@ -87,7 +87,7 @@
   </g>
 
   <!-- AI-stage note -->
-  <text x="500" y="432" text-anchor="middle" font-size="10.5" fill="#3b6fe0">AI stages run concurrently (bounded) · models auto-route by difficulty when enabled (Haiku↔Sonnet↔Opus↔Fable)</text>
+  <text x="500" y="432" text-anchor="middle" font-size="10.5" fill="#3b6fe0">AI stages run concurrently or batched (~50% cost) · models auto-route by difficulty when enabled (Haiku↔Sonnet↔Opus↔Fable)</text>
 
   <!-- OUTPUTS -->
   <text x="40" y="480" font-size="11" font-weight="700" letter-spacing="1" fill="#94a3b8">OUTPUTS</text>

@@ -46,6 +46,7 @@
            background: var(--panel2); border: 1px solid var(--line); color: var(--muted); margin-right: 4px; }
   .badge.kev { background: #3a1620; border-color: var(--crit); color: #ffb3bb; }
   .badge.chain { background: #16233a; border-color: var(--accent); color: #b9d2ff; }
+  .badge.ok { background: #16261a; border-color: #2f8f4e; color: #a7e0b8; }
   .badge.src { text-transform: uppercase; }
   .muted { color: var(--muted); }
   select.state { padding: 5px 8px; }
@@ -267,9 +268,11 @@ function render() {
   $('#empty').style.display = list.length ? 'none' : 'block';
   $('#rows').innerHTML = list.map(f => {
     const ex = f.exploitability;
+    const tags = f.tags || [];
     const signals = [
       ex.in_kev ? '<span class="badge kev">KEV</span>' : '',
       ex.chain_ids.length ? `<span class="badge chain">chain×${ex.chain_ids.length}</span>` : '',
+      tags.includes('corroborated') ? '<span class="badge ok" title="Found in every OpenHack whitebox review pass">corroborated</span>' : '',
       ex.epss != null ? `<span class="badge">EPSS ${(ex.epss*100).toFixed(0)}%</span>` : '',
       f.sources.map(s => `<span class="badge src">${esc(s)}</span>`).join(''),
     ].join('');
@@ -474,7 +477,7 @@ function renderOverview() {
   $('#overviewView').innerHTML = `
     <div class="card">
       <h4>codescan — vulnerability triage</h4>
-      <p class="hint">Aggregates Snyk + Xray findings across your repositories, uses AI to assess exploitability and multi-step attack chains, scores and triages them, and produces a ServiceNow Vulnerability Response feed.</p>
+      <p class="hint">Aggregates Snyk, Xray, and OpenHack whitebox-review findings across your repositories, uses AI to assess exploitability, multi-step attack chains, and per-service STRIDE threat models, scores and triages them, and produces a ServiceNow Vulnerability Response feed.</p>
       <div class="chips">
         <span class="chip">source: <b>${esc(m.source || '—')}</b></span>
         <span class="chip">${m.use_ai ? 'AI on' : 'AI off'}</span>

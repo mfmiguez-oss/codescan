@@ -86,9 +86,9 @@ def main() -> None:
     ax.plot([771, 771, 199], [320, 338, 338], color=GRAY, linewidth=1.8, zorder=1)
     arrow(ax, (199, 338), (199, 352))
 
-    # AI-stage note: concurrency + adaptive routing
-    ax.text(500, 432, "AI stages run concurrently (bounded) · models auto-route by "
-            "difficulty when enabled (Haiku↔Sonnet↔Opus↔Fable)",
+    # AI-stage note: concurrency / batch + adaptive routing
+    ax.text(500, 432, "AI stages run concurrently or batched (~50% cost) · models "
+            "auto-route by difficulty when enabled (Haiku↔Sonnet↔Opus↔Fable)",
             ha="center", va="center", fontsize=8.6, color=BLUE)
 
     # outputs
