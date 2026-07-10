@@ -228,6 +228,34 @@ exploitability dimension above — so threat models feed the score (counted once
 not double-weighted) rather than just reporting (see
 [Threat modeling](#threat-modeling)).
 
+## Analyst feedback loop
+
+The tool **learns from your triage**. Every confirm / false-positive decision is
+persisted (`validation.py`), and on the next scan `feedback.py` turns that history
+into a bounded, per-weakness/component **prior**: if analysts have repeatedly
+dismissed a weakness family (CWE) or component as false positives, a new finding
+sharing that trait is nudged **down**; a repeatedly-confirmed trait nudges **up**.
+It closes the loop so the scanner adapts to *your* estate instead of scoring every
+run identically.
+
+It's deliberately conservative and **explainable**:
+
+- **Bounded** — capped at `feedback.max_adjust` points (default 15) and requires
+  `feedback.min_evidence` prior decisions, so a couple of calls can't swing a score.
+- **Transparent** — every adjusted finding gets a plain-language reason in its
+  rationale ("score lowered 15 by analyst-feedback prior — 0 confirmed, 3
+  false-positive on related weakness/component"), a **`feedback-adjusted`** tag
+  (a `feedback` badge in the queue), and a `feedback_adjusted` count in the scan's
+  audit event.
+- **Safe** — it only moves the *machine score*, never an analyst's validation
+  state; a finding never counts toward adjusting itself; and an actively-exploited
+  (KEV) finding is never pushed below `kev_floor`.
+- **Self-activating** — a no-op until there's manual history; only `confirmed`
+  (true positive) and `false_positive` decisions count (not `risk_accepted` /
+  `resolved`, which are business/lifecycle outcomes, not accuracy signals).
+
+On by default; toggle in the Config tab (`feedback.enabled`).
+
 ## Install
 
 ```bash

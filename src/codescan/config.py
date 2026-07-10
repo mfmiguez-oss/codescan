@@ -200,6 +200,16 @@ class VaultConfig(_StrictModel):
     verify_tls: bool = True
 
 
+class FeedbackConfig(_StrictModel):
+    """Learn from analysts' persisted confirm / false-positive decisions to nudge
+    the risk score of new, similar findings (same weakness family or component).
+    Bounded and explainable; no-op until there's manual feedback history."""
+
+    enabled: bool = True
+    max_adjust: float = 15.0     # cap the +/- score nudge (points on the 0-100 scale)
+    min_evidence: int = 2        # need at least this many prior manual decisions for a key
+
+
 class AuditConfig(_StrictModel):
     """Append-only audit log of key events (scan runs, config + validation-state
     changes) with actor + timestamp, one JSON object per line (JSONL)."""
@@ -232,6 +242,7 @@ class Config(_StrictModel):
     enrichment: EnrichmentConfig = EnrichmentConfig()
     threat_model: ThreatModelConfig = ThreatModelConfig()
     scoring: ScoringConfig = ScoringConfig()
+    feedback: FeedbackConfig = FeedbackConfig()
     vault: VaultConfig = VaultConfig()
     audit: AuditConfig = AuditConfig()
 

@@ -183,3 +183,14 @@ scoring:
     chaining: 0.15       # membership in a multi-step attack chain
   # A finding in the KEV catalog is floored to at least this score.
   kev_floor: 85
+
+# Analyst-feedback loop: learn from persisted confirm / false-positive decisions to
+# nudge the risk score of new, similar findings (same weakness family or component).
+# Bounded and explainable — every adjusted finding gets a reason in its rationale, a
+# feedback-adjusted tag, and a count in the scan's audit event; it never overrides an
+# analyst's state and never pushes a KEV finding below kev_floor. No-op until there's
+# manual triage history to learn from.
+feedback:
+  enabled: true
+  max_adjust: 15       # cap the +/- score nudge (points)
+  min_evidence: 2      # need at least this many prior manual decisions for a weakness/component

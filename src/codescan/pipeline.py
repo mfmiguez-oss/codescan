@@ -30,6 +30,7 @@ from .dedup import deduplicate
 from .dedup_ai import SemanticDeduper
 from .enrich import build_enrichers, run_enrichment
 from .exploitability import ExploitabilityEngine
+from .feedback import apply_feedback
 from .llm import LLMClient, ModelRouter
 from .models import Finding, Repo, ThreatModel
 from .openhack_runner import OpenHackRunner
@@ -196,6 +197,10 @@ class Pipeline:
         Scorer(self.cfg.scoring).score(findings, chains)
 
         store = StateStore(state_path)
+        # Calibrate scores from the org's accumulated confirm/false-positive history
+        # (built from the store as loaded, i.e. prior decisions) before this run's
+        # states are recorded.
+        n_feedback = apply_feedback(findings, store, self.cfg.feedback, self.cfg.scoring.kev_floor)
         assign_states(findings, store)
         store.save()
 
@@ -211,6 +216,7 @@ class Pipeline:
         )
         audit.record("scan.completed", actor=actor, run_id=run_id, mode=mode,
                      repos=len(repos), findings=len(findings), chains=len(chains),
-                     threat_models=len(threat_models), kev=kev, duration_s=duration)
+                     threat_models=len(threat_models), kev=kev,
+                     feedback_adjusted=n_feedback, duration_s=duration)
         return PipelineResult(repos=repos, findings=findings, chains=chains,
                               threat_models=threat_models, servicenow_items=items)

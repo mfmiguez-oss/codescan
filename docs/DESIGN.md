@@ -103,7 +103,7 @@ ServiceNow-ready output on its own.
 |---|---|---|
 | Connectors | `connectors/`, `openhack_engine.py`, `openhack_runner.py` | Talk to external systems; emit/consume raw scanner shapes; in-process whitebox review. |
 | Domain model | `models.py` | Canonical `Finding`, fingerprinting, state enums, difficulty signals. |
-| Processing | `dedup*.py`, `enrich/`, `exploitability.py`, `scoring.py`, `validation.py`, `threatmodel.py` | Transform findings; synthesize threat models. |
+| Processing | `dedup*.py`, `enrich/`, `exploitability.py`, `scoring.py`, `validation.py`, `feedback.py`, `threatmodel.py` | Transform findings; calibrate from feedback; synthesize threat models. |
 | AI infrastructure | `llm.py`, `providers/`, `concurrency.py` | Model routing (+ auto-route), multi-provider client, bounded parallelism. |
 | Cross-cutting | `logging_setup.py`, `audit.py`, `vault.py` | Observability, append-only audit log, secret sourcing. |
 | Orchestration | `pipeline.py` | Wire stages together; two ingest modes. |
@@ -383,10 +383,29 @@ confirmed; unreachable + low exploitability → under_investigation as a candida
 FP; high score/severity → confirmed; else new). A human confirms or overrides.
 
 **Persistence** is the important property. The `StateStore` persists each
-decision keyed by fingerprint and tags whether a human set it (`manual`). On
-rescan, `assign_states` honors any manual decision or terminal closure and
-never re-opens it — analyst effort is never silently discarded. Machine
-proposals remain re-derivable.
+decision keyed by fingerprint and tags whether a human set it (`manual`), along
+with the finding's weakness/component attributes. On rescan, `assign_states`
+honors any manual decision or terminal closure and never re-opens it — analyst
+effort is never silently discarded. Machine proposals remain re-derivable.
+
+### 5.7a Analyst-feedback loop (`feedback.py`)
+
+The persisted decisions are also a training signal. Before export, `apply_feedback`
+builds a **prior** from the manual `confirmed` (true positive) and `false_positive`
+decisions in the state store, aggregated by weakness family (CWE) and component. A
+new finding sharing a trait the org has repeatedly dismissed is nudged **down**;
+one it has repeatedly confirmed, **up** — so the scanner adapts to *this* estate
+rather than scoring every run identically. This is the feedback loop that a
+deterministic-plus-LLM system otherwise lacks.
+
+It is deliberately conservative and explainable: the adjustment is capped
+(`feedback.max_adjust`) and gated on a minimum sample (`feedback.min_evidence`); it
+scales with consensus (unanimous history → full cap); a finding never contributes to
+adjusting itself; only accuracy states count (not `risk_accepted`/`resolved`); it
+moves only the *machine score*, never the analyst's state; and a KEV finding is
+never pushed below `kev_floor`. Every adjusted finding records the reason in its
+rationale and a `feedback-adjusted` tag, and the scan's audit event carries the
+adjusted count — nothing is a black box.
 
 ### 5.8 ServiceNow export (`servicenow.py`)
 
@@ -525,6 +544,7 @@ silently picks a cheaper or stronger model tier by difficulty (§5.5).
 | Bounded concurrency across per-service calls | Sequential | Independent I/O-bound calls; parallelism cuts wall-clock time with deterministic apply order and no cost change. |
 | Composite score with KEV floor | Rank by CVSS | CVSS mis-ranks; the blend + floor put actively-exploited and chainable issues on top. |
 | Persistent, human-tagged validation states | Recompute every run | Analyst decisions must survive rescans; machine proposals stay re-derivable. |
+| Feedback loop: bounded, explainable score prior from analyst decisions | No feedback; or opaque model retraining | Closes the loop (scanner adapts to the estate) while staying transparent, capped, and never overriding the human or the KEV floor. |
 | Idempotent export via `correlation_id` | Insert-only | Prevents duplicate VR items and re-opening closed ones across daily runs. |
 | Default to Opus 4.8, opt into Fable 5 | Default Fable | Opus is the right default; Fable is reserved for hardest chaining and auto-enables refusal fallbacks. |
 
@@ -661,6 +681,9 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
 - **Audit log** (`tests/test_audit.py`) — record/tail JSONL round-trip, disabled
   no-op, pipeline scan events, and the web actor-attributed config/state events via
   `GET /api/audit`.
+- **Feedback loop** (`tests/test_feedback.py`) — false-positive history lowers /
+  confirmed raises the score, min-evidence gate, self-exclusion, KEV-floor respect,
+  disabled no-op, accuracy-states-only, and store attribute round-trip.
 - **Web API** (`tests/test_web.py`) — FastAPI TestClient over state, scan,
   state-change (persistent-across-rescan), validation, ServiceNow, and the
   **API-token guard** (401 without, accepted via header/cookie, healthz open).
@@ -689,6 +712,7 @@ builds the image on every push/PR; `mypy` is a clean gate and the package ships
 - `enrichment` — KEV/EPSS feed URLs + per-enricher toggles.
 - `threat_model` — `enabled`.
 - `scoring` — dimension weights + `kev_floor`.
+- `feedback` — analyst-feedback score prior: `enabled`, `max_adjust`, `min_evidence`.
 - `vault` — optional HashiCorp Vault secret source: `enabled`, `address`,
   `auth` (token/approle), `kv_mount`/`kv_version`, `paths`, `override_env`.
 - `audit` — append-only JSONL audit log: `enabled`, `path`.

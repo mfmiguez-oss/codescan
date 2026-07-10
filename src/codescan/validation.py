@@ -44,31 +44,48 @@ class StateStore:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
             for fid, val in raw.items():
                 if isinstance(val, str):
-                    self._entries[fid] = {"state": _coerce_state(val), "manual": True}
+                    self._entries[fid] = {"state": _coerce_state(val), "manual": True,
+                                          "cwes": [], "component": ""}
                 else:
                     self._entries[fid] = {
                         "state": _coerce_state(val["state"]),
                         "manual": bool(val.get("manual", False)),
+                        # Attributes captured for the analyst-feedback prior (feedback.py);
+                        # absent on legacy entries, which simply don't contribute.
+                        "cwes": list(val.get("cwes", [])),
+                        "component": val.get("component", ""),
                     }
 
     def entry(self, finding_id: str) -> dict | None:
         return self._entries.get(finding_id)
+
+    def all_entries(self) -> dict[str, dict]:
+        return self._entries
 
     def prior(self, finding_id: str) -> ValidationState | None:
         e = self._entries.get(finding_id)
         return e["state"] if e else None
 
     def record(self, finding: Finding, *, manual: bool = False) -> None:
-        self._entries[finding.id] = {"state": finding.validation_state, "manual": manual}
+        # Capture the weakness/component so a manual decision can inform the
+        # feedback prior for similar findings later (feedback.py).
+        self._entries[finding.id] = {
+            "state": finding.validation_state, "manual": manual,
+            "cwes": list(finding.cwe_ids), "component": finding.component.name,
+        }
 
     def save(self) -> None:
         if not self.path:
             return
-        payload = json.dumps(
-            {k: {"state": v["state"].value, "manual": v["manual"]}
-             for k, v in self._entries.items()},
-            indent=2,
-        )
+        def _dump(v: dict) -> dict:
+            e = {"state": v["state"].value, "manual": v["manual"]}
+            if v.get("cwes"):
+                e["cwes"] = v["cwes"]
+            if v.get("component"):
+                e["component"] = v["component"]
+            return e
+
+        payload = json.dumps({k: _dump(v) for k, v in self._entries.items()}, indent=2)
         # Atomic write: a crash mid-write must not truncate persisted analyst
         # decisions. Write a sibling temp file, then os.replace (atomic on the
         # same filesystem) over the target.
