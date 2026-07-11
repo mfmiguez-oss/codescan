@@ -5,7 +5,7 @@
 | **Status** | Draft / v0.2 |
 | **Owner** | Application Security Engineering |
 | **Scope** | Enterprise code-scanning aggregation, AI exploitability triage, and ServiceNow VR feed |
-| **Related** | `README.md` (usage), [DATAFLOW.md](DATAFLOW.md) (formal DFDs + trust boundaries), [GOVERNANCE.md](GOVERNANCE.md) (controls → evidence), [RELEASING.md](RELEASING.md) (change/release procedure), source under `src/codescan/` |
+| **Related** | `README.md` (usage), [DATAFLOW.md](DATAFLOW.md) (formal DFDs + trust boundaries), [THREATMODEL.md](THREATMODEL.md) (ATLAS-aligned threat model), [GOVERNANCE.md](GOVERNANCE.md) (controls → evidence), [RELEASING.md](RELEASING.md) (change/release procedure), source under `src/codescan/` |
 
 ---
 
@@ -847,6 +847,11 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   and **rate limiting** (429 on flood with `Retry-After`, healthz unthrottled).
 - **Rate limiter** (`tests/test_ratelimit.py`) — token-bucket burst then block,
   time-based refill, per-client isolation, idle-bucket eviction.
+- **Adversarial / robustness** (`tests/test_security.py`) — the ATLAS-aligned
+  threat model's guards: injection text carried as data only, a hostile model
+  response can't invent findings or inflate scores (id allow-listing, score
+  clamping, enum fallback), poisoned feedback stays within the cap and never
+  overrides the KEV floor. See [THREATMODEL.md](THREATMODEL.md).
 
 All tests run offline with no Anthropic key. The AI stages are integration
 points validated by contract (schema) rather than live calls. **CI**

@@ -336,7 +336,9 @@ const children = [
     "Audit log (tests/test_audit.py) — record/tail JSONL round-trip, disabled no-op, pipeline scan events, web actor-attributed config/state events via GET /api/audit, and the SIEM sinks (HTTP POST incl. HEC event_key, sink-failure isolation, syslog smoke, bad-sink survivability).",
     "Feedback loop (tests/test_feedback.py) — false-positive history lowers / confirmed raises the score, min-evidence gate, self-exclusion, KEV-floor respect, disabled no-op, accuracy-states-only, store attribute round-trip, evidence weighting (shrinkage growth, time decay, same-repo boost), and TriageHistory prompt-context counts and analyst notes (labeled, capped).",
     "Exploitability engine (tests/test_exploitability.py) — fake-LLM prompt assembly: results applied to findings/chains, prior_analyst_decisions carried with the right counts, omitted when there's no history or the feature is off.",
-    "Web API (tests/test_web.py) — FastAPI TestClient over state, scan, state-change (persisted across rescan), validation, ServiceNow, and the API-token guard.",
+    "Web API (tests/test_web.py) — FastAPI TestClient over state, scan, state-change (persisted across rescan), validation, ServiceNow, the API-token guard, and rate limiting (429 on flood, healthz unthrottled).",
+    "Rate limiter (tests/test_ratelimit.py) — token-bucket burst/refill, per-client isolation, idle eviction.",
+    "Adversarial / robustness (tests/test_security.py) — the ATLAS-aligned threat model's guards: injection text carried as data only, a hostile model response can't invent findings or inflate scores (id allow-listing, score clamping, enum fallback), poisoned feedback stays within the cap and never overrides the KEV floor.",
     "All tests run offline with no Anthropic key; AI stages are validated by contract (schema) rather than live calls. CI (.github/workflows/ci.yml) runs ruff + mypy + pytest on a 3.10-3.12 matrix and builds the image on every push/PR; mypy is a clean gate and the package ships py.typed.",
   ]),
 

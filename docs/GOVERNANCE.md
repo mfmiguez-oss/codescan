@@ -3,9 +3,10 @@
 Maps common AI-governance controls to the concrete evidence this project
 provides, and states plainly where a control is (by nature) the adopting
 organization's to operate. Companion documents:
-[DATAFLOW.md](DATAFLOW.md) (formal DFD set), [DESIGN.md](DESIGN.md)
-(architecture and rationale), [RELEASING.md](RELEASING.md) (change and release
-procedure).
+[DATAFLOW.md](DATAFLOW.md) (formal DFD set), [THREATMODEL.md](THREATMODEL.md)
+(ATLAS-aligned adversarial threat model), [SECURITY_FRAMEWORKS.md](SECURITY_FRAMEWORKS.md)
+(framework-by-framework review), [DESIGN.md](DESIGN.md) (architecture and
+rationale), [RELEASING.md](RELEASING.md) (change and release procedure).
 
 ## 1. Dataflow diagrams and process flow documentation
 
@@ -25,6 +26,7 @@ procedure).
 | End-user documentation | [README](../README.md), the in-app usage guide (Overview tab), and the finding drawer surfacing the "why" behind every score |
 | Model documentation (architecture, training data, performance) | The models are externally hosted; their architecture/training documentation is the providers': [Anthropic model overview](https://docs.claude.com/en/docs/about-claude/models), [OpenAI models](https://platform.openai.com/docs/models), [Gemini models](https://ai.google.dev/gemini-api/docs/models). What codescan owns and documents: which model runs which task (§5.5 routing table, Config tab), and **measured in-context performance** — the calibration report grades each configured model's predictions against analyst outcomes |
 | Performance expectations and measures | Calibration report (§5.7b): confirm rate by predicted-score bucket, score separation, noisy families; drift alerting thresholds in `calibration:` config |
+| Adversarial robustness (threat model + testing) | [THREATMODEL.md](THREATMODEL.md) (ATLAS-aligned: prompt injection, evasion, feedback poisoning, exfiltration, DoS, excessive agency) with a guarding test per threat in `tests/test_security.py`, run in the offline gate |
 | Compliance / safety / accountability | DESIGN.md §8 (security & privacy), §9 (failure modes), audit log with actor attribution; refusal handling documented (§8). Bias/fairness: the system scores *software vulnerabilities*, not people — no personal attributes enter any model input (see DATAFLOW.md §3 data-out column); the residual fairness surface (uneven scoring across weakness families) is exactly what the calibration report measures per-CWE |
 | Licensing | MIT ([LICENSE](../LICENSE), `pyproject.toml` metadata) — permissive, widely accepted |
 | Data management and traceability | Decision snapshots (machine belief frozen at decision time), `decided_at` timestamps, analyst notes, actor attribution from SSO headers, append-only audit → SIEM; data sourcing is org-owned scanner output (no third-party training data enters the system) |
