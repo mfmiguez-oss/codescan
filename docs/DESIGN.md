@@ -5,7 +5,7 @@
 | **Status** | Draft / v0.1 |
 | **Owner** | Application Security Engineering |
 | **Scope** | Enterprise code-scanning aggregation, AI exploitability triage, and ServiceNow VR feed |
-| **Related** | `README.md` (usage), source under `src/codescan/` |
+| **Related** | `README.md` (usage), [DATAFLOW.md](DATAFLOW.md) (formal DFDs + trust boundaries), [GOVERNANCE.md](GOVERNANCE.md) (controls → evidence), [RELEASING.md](RELEASING.md) (change/release procedure), source under `src/codescan/` |
 
 ---
 
@@ -664,7 +664,10 @@ silently picks a cheaper or stronger model tier by difficulty (§5.5).
 ## 8. Security & privacy
 
 This tool handles vulnerability data about first-party code and sends some of it
-to an LLM and to ServiceNow. Considerations:
+to an LLM and to ServiceNow. The formal DFD set with trust boundaries and a
+per-boundary data-crossing table is [DATAFLOW.md](DATAFLOW.md); the
+AI-governance control mapping is [GOVERNANCE.md](GOVERNANCE.md).
+Considerations:
 
 - **What leaves the environment.** The exploitability, threat-modeling, dedup, and
   enrichment stages send finding *metadata* (titles, CVEs, package coordinates,

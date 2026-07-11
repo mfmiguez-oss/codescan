@@ -272,6 +272,7 @@ const children = [
     [2500, 2700, 4160]),
 
   H1("8. Security & privacy"),
+  P("The formal DFD set (context / logical / physical with trust boundaries and a per-boundary data-crossing table) is docs/DATAFLOW.md; the AI-governance control mapping is docs/GOVERNANCE.md; the change and release procedure is docs/RELEASING.md."),
   ...bullets([
     "What leaves the environment — the exploitability, threat-modeling, dedup, and enrichment stages send finding metadata (titles, CVEs, package coordinates, descriptions, deterministic signals) to the model API, not source code. The exception is the built-in OpenHack engine, whose whole purpose is whitebox review: it sends selected first-party source file contents (off unless openhack.auto; bounded by max_files/max_file_bytes). Stricter deployments can run --no-ai, disable OpenHack while keeping the metadata-only stages, or route to an approved deployment.",
     "Secrets — all credentials are injected via env vars / ${ENV} interpolation; none are committed. .gitignore excludes .env and generated output. Optionally fetched from HashiCorp Vault (vault.enabled, vault.py): KV secrets are injected into the environment before interpolation (token or AppRole auth, KV v1/v2, existing env wins unless override_env); Vault's own bootstrap creds come from the environment.",

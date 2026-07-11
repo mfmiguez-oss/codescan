@@ -27,6 +27,12 @@ diagram is in [docs/architecture.svg](docs/architecture.svg) /
 [`.png`](docs/architecture.png) — regenerate the graphic with
 `python docs/make_diagram.py` and the Word doc with `node docs/build_docx.mjs`.
 
+Governance and audit documentation: **[docs/DATAFLOW.md](docs/DATAFLOW.md)**
+(formal context/logical/physical DFDs with trust boundaries),
+**[docs/GOVERNANCE.md](docs/GOVERNANCE.md)** (AI-governance controls mapped to
+evidence, incl. external model documentation references), and
+**[docs/RELEASING.md](docs/RELEASING.md)** (change and release procedure).
+
 ## How it maps to the requirements
 
 | Requirement | Where it lives |
