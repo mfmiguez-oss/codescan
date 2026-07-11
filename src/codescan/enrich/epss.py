@@ -28,7 +28,7 @@ class EpssEnricher(BaseEnricher):
 
     def _load(self, cves: list[str]) -> dict[str, float]:
         out: dict[str, float] = {}
-        for i in range(0, len(cves), 100):          # batch to keep URLs sane
+        for i in range(0, len(cves), 100):          # batch to keep URLs within length limits
             chunk = cves[i : i + 100]
             try:
                 resp = requests.get(

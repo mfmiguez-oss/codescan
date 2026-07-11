@@ -283,12 +283,13 @@ run identically.
 It's deliberately conservative and **explainable**:
 
 - **Bounded** — capped at `feedback.max_adjust` points (default 15) and requires
-  `feedback.min_evidence` prior decisions, so a couple of calls can't swing a score.
-- **Statistically honest** — evidence is *weighted*, not just counted: confidence
+  `feedback.min_evidence` prior decisions, so a small number of decisions cannot
+  move a score far.
+- **Evidence-weighted** — decisions are weighted, not just counted: confidence
   grows with volume (`feedback.shrinkage` pseudo-count damping — two unanimous
-  decisions move a score far less than twenty), old decisions fade
-  (`feedback.half_life_days`, weight halves per half-life), and decisions made in
-  the **same repo** as the new finding outweigh estate-wide precedent
+  decisions move a score far less than twenty), old decisions lose weight over
+  time (`feedback.half_life_days`, weight halves per half-life), and decisions
+  made in the **same repo** as the new finding outweigh estate-wide precedent
   (`feedback.same_repo_boost`).
 - **Transparent** — every adjusted finding gets a plain-language reason in its
   rationale ("score lowered 10 by analyst-feedback prior — 0 confirmed, 3
@@ -333,7 +334,7 @@ no longer boosts finding scores, feeds threat modeling, or reaches the
 ServiceNow export. This closes the loop on the pipeline's most speculative
 output — chaining — which previously had no feedback signal at all.
 
-### Score calibration — is the scoring actually right?
+### Score calibration — measuring scoring accuracy
 
 Every decision the store persists also freezes a **snapshot of what the machine
 believed at that moment** (risk score, AI exploitability score, EPSS, KEV,
@@ -348,8 +349,8 @@ shows:
 - **Score separation** — mean predicted score of confirmed vs false-positive
   decisions; a bigger gap means the score carries real signal.
 - **Noisiest weakness families / components** — the CWEs and packages analysts
-  mostly dismiss: what's wasting triage time (and what the feedback prior is
-  already nudging down).
+  mostly dismiss: where triage time is going to false positives (and what the
+  feedback prior is already adjusting down).
 
 View it in the UI's **Calibration** tab (`GET /api/calibration`) or run
 `codescan calibration`. It also makes model/provider changes measurable: change
@@ -361,7 +362,7 @@ thresholds (`calibration:` in config — high-bucket confirm rate, score
 separation, each gated on a minimum evidence count), emits a
 `calibration.drift` **audit event that fans out to the SIEM sinks**, logs a
 warning, flags it in the Calibration tab, and prints it from the CLI. Drift
-pages someone instead of waiting to be noticed in a report.
+raises an alert instead of waiting to be noticed in a report.
 
 ## Install
 
@@ -410,7 +411,7 @@ boundaries, posture, and recommendations.
 A **Calibration** tab grades past risk scores against analysts' manual
 confirm / false-positive decisions: confirm rate by predicted-score bucket,
 score separation, and the noisiest weakness families (see
-[Score calibration](#score-calibration--is-the-scoring-actually-right)).
+[Score calibration](#score-calibration--measuring-scoring-accuracy)).
 
 A **Config** tab manages non-secret settings live: the **repo source**
 (Bitbucket/GitHub) and **GitHub repo/org targets**, the default AI tier, per-task

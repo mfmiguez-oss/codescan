@@ -3,8 +3,8 @@
 The state store accumulates manual triage decisions, and (since decision
 snapshots landed in `validation.py`) each one carries what the machine believed
 at decision time — most importantly the composite risk score. Comparing the two
-answers the question no amount of modelling can: *is the scoring actually
-right?*
+answers a question the model cannot answer about itself: do the scores predict
+what analysts confirm?
 
 The report is deliberately simple and explainable, matching the feedback
 prior's design constraints:
@@ -16,8 +16,8 @@ prior's design constraints:
   * **Separation** — mean predicted score of confirmed vs false-positive
     decisions. Bigger gap = the score carries real signal.
   * **Noisiest families** — CWE families and components whose manual history is
-    dominated by false positives: the concrete "what is wasting analyst time"
-    list, and the same keys the feedback prior (feedback.py) nudges on.
+    dominated by false positives: where analyst time is going to false
+    positives, and the same keys the feedback prior (feedback.py) adjusts on.
 
 Only manual `confirmed` / `false_positive` decisions count — the same accuracy
 signals feedback.py uses; lifecycle outcomes (risk_accepted, resolved) say
@@ -136,8 +136,8 @@ def drift_alerts(report: dict, cfg: CalibrationConfig) -> list[str]:
     monitoring control. Returns human-readable alert strings (empty = healthy).
 
     Deliberately conservative: a check only fires with at least
-    `min_bucket_decisions` of evidence behind it, so a cold store or a couple
-    of contrarian decisions can't page anyone.
+    `min_bucket_decisions` of evidence behind it, so a new deployment or a
+    small number of disagreeing decisions cannot trigger alerts.
     """
     if not cfg.alerts_enabled:
         return []

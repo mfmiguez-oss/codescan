@@ -213,7 +213,7 @@ class OpenHackEngine:
     # --- batching ---------------------------------------------------------
     def _batches(self, files: list[Path], root: Path):
         """Yield batches of (relpath, text) bounded by a character budget so each
-        request stays within a sane context size."""
+        request stays within a predictable context size."""
         budget = self.cfg.batch_chars
         batch: list[tuple[str, str]] = []
         size = 0

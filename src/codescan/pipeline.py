@@ -222,7 +222,7 @@ class Pipeline:
 
         # Continuous calibration monitoring: grade the accumulated predictions
         # against analyst outcomes and raise drift as audit events (which fan
-        # out to the SIEM sinks), so degradation pages someone instead of
+        # out to the SIEM sinks), so degradation raises an alert instead of
         # waiting to be noticed in the report.
         for alert in drift_alerts(calibration_report(store), self.cfg.calibration):
             logger.warning("scan %s: calibration drift — %s", run_id, alert)

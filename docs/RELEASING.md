@@ -26,7 +26,7 @@ in [GOVERNANCE.md](GOVERNANCE.md) §3–§4.
    push. History stays linear; every commit on `main` passed the full gate.
 6. **CI re-runs the gate** on every push/PR ([ci.yml](../.github/workflows/ci.yml)):
    ruff + mypy + pytest on a Python 3.10–3.12 matrix, plus a Docker image
-   build. A red CI run on `main` is treated as a stop-the-line event.
+   build. A failing CI run on `main` blocks further merges until it is fixed.
 
 **Never committed:** runtime artifacts (`audit.jsonl`, `validation_state.json`,
 `servicenow_import.json`, `threat_models.json`, `config.overrides.json`,
@@ -58,7 +58,7 @@ in [GOVERNANCE.md](GOVERNANCE.md) §3–§4.
 
 ## Emergency changes
 
-Same gate, compressed ceremony: branch, fix, full local gate (never skipped —
+Same gate, expedited process: branch, fix, full local gate (never skipped —
 it runs in minutes offline), ff-merge, push, and record the rationale in the
 commit message body (`Emergency: <what broke, why this is safe>`). If review
 is bypassed under the multi-maintainer model, open a retroactive review issue

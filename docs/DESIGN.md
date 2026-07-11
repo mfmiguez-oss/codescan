@@ -459,9 +459,9 @@ Evidence is **weighted, not just counted** — the delta is
 weight is decayed by age (halving every `feedback.half_life_days`; legacy
 decisions without a timestamp count as one half-life old) and boosted when it
 was made in the *same repo* as the new finding (`feedback.same_repo_boost`).
-The shrinkage pseudo-count keeps thin evidence humble: two unanimous decisions
-nudge, twenty approach the cap. Setting `shrinkage: 0`, `half_life_days: 0`
-restores the raw-consensus behavior.
+The shrinkage pseudo-count limits the influence of small samples: two unanimous
+decisions produce a small adjustment; twenty approach the cap. Setting
+`shrinkage: 0`, `half_life_days: 0` restores the raw-consensus behavior.
 
 The same history also reaches the model directly: `TriageHistory` packages the
 per-finding confirmed/false-positive counts — plus up to three most-recent
@@ -504,9 +504,9 @@ pipeline re-grades the history and raises a `calibration.drift` audit event —
 fanning out to the SIEM sinks like every audit event — when either check trips:
 the 80–100 bucket's confirm rate falls below `min_high_confirm_rate`, or the
 confirmed-vs-false-positive mean-score gap falls below `min_separation`. Both
-checks stay silent below `min_bucket_decisions` of evidence, so a cold store or
-a couple of contrarian decisions can't page anyone. Alerts also surface in the
-Calibration tab and the CLI report.
+checks stay silent below `min_bucket_decisions` of evidence, so a new
+deployment or a small number of disagreeing decisions does not trigger alerts.
+Alerts also surface in the Calibration tab and the CLI report.
 
 ### 5.8 ServiceNow export (`servicenow.py`)
 

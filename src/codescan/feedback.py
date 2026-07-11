@@ -7,7 +7,7 @@ bounded, *explainable* prior: if analysts have repeatedly dismissed findings of 
 given weakness family (CWE) or component as false positives, a new finding sharing
 that trait is nudged **down**; a repeatedly-confirmed trait nudges **up**.
 
-The prior is statistically honest about its evidence:
+The prior weighs its evidence rather than merely counting it:
   * **Shrinkage** (`feedback.shrinkage`) — pseudo-count damping, so confidence
     grows with volume: two unanimous decisions move a score far less than twenty.
   * **Time decay** (`feedback.half_life_days`) — a decision's weight halves every
@@ -17,8 +17,8 @@ The prior is statistically honest about its evidence:
 
 Design constraints, deliberately conservative:
   * **Bounded** — the adjustment is capped at `feedback.max_adjust` points and
-    requires `feedback.min_evidence` prior decisions, so a couple of calls can't
-    swing a score wildly.
+    requires `feedback.min_evidence` prior decisions, so a small number of
+    decisions cannot move a score far.
   * **Explainable** — every adjusted finding gets a plain-language reason in its
     rationale and a `feedback-adjusted` tag; the scan's audit event records how
     many were touched. Nothing about the calibration is a black box.
@@ -64,7 +64,7 @@ def _entry_keys(entry: dict) -> list[str]:
 class FeedbackModel:
     """Per-key tallies of manual confirmed vs false-positive decisions (by finding
     id, so a finding can be excluded from adjusting itself), plus per-decision
-    metadata (age, repo) so the delta can weight evidence honestly."""
+    metadata (age, repo) so the delta can weight evidence by recency and repo."""
 
     def __init__(self) -> None:
         self._pos: dict[str, set[str]] = {}
@@ -128,8 +128,9 @@ class FeedbackModel:
         denom = wpos + wneg + max(0.0, cfg.shrinkage)
         if denom <= 0:
             return 0.0, ""
-        # Shrinkage keeps thin evidence humble: the delta approaches ±max_adjust
-        # only as (weighted) unanimous evidence outgrows the pseudo-count.
+        # Shrinkage limits the influence of small samples: the delta approaches
+        # ±max_adjust only as (weighted) unanimous evidence outgrows the
+        # pseudo-count.
         delta = cfg.max_adjust * (wpos - wneg) / denom
         delta = max(-cfg.max_adjust, min(cfg.max_adjust, round(delta, 1)))
         if abs(delta) < 0.5:

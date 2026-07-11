@@ -66,7 +66,7 @@ evidence and enforcement substrate that process plugs into:
 
 ## Known residuals
 
-Stated openly rather than papered over:
+Stated explicitly:
 
 - **Per-user authentication** is delegated to a fronting SSO/reverse proxy;
   codescan trusts its identity header for audit attribution (DESIGN.md §8).

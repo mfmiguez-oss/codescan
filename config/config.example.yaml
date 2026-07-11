@@ -235,7 +235,8 @@ feedback:
 # confirm / false-positive decisions; if calibration degrades past these thresholds
 # the scan emits a `calibration.drift` audit event (forwarded to the SIEM sinks)
 # and the UI Calibration tab shows the alert. Checks stay silent below
-# min_bucket_decisions of evidence so a cold store can't page anyone.
+# min_bucket_decisions of evidence, so no alerts fire until enough triage
+# history exists.
 calibration:
   alerts_enabled: true
   min_bucket_decisions: 5      # evidence needed before a check can fire
