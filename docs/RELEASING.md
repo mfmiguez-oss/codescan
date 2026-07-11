@@ -25,8 +25,10 @@ in [GOVERNANCE.md](GOVERNANCE.md) §3–§4.
 5. **Merge**: fast-forward only (`git merge --ff-only`), delete the branch,
    push. History stays linear; every commit on `main` passed the full gate.
 6. **CI re-runs the gate** on every push/PR ([ci.yml](../.github/workflows/ci.yml)):
-   ruff + mypy + pytest on a Python 3.10–3.12 matrix, plus a Docker image
-   build. A failing CI run on `main` blocks further merges until it is fixed.
+   ruff + mypy + pytest on a Python 3.10–3.12 matrix, a Docker image build, and a
+   **supply-chain job** — a `pip-audit` dependency vulnerability scan and a
+   CycloneDX SBOM uploaded as a build artifact. A failing CI run on `main` blocks
+   further merges until it is fixed.
 
 **Never committed:** runtime artifacts (`audit.jsonl`, `validation_state.json`,
 `servicenow_import.json`, `threat_models.json`, `config.overrides.json`,

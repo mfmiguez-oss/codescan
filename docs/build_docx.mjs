@@ -339,7 +339,7 @@ const children = [
     "Web API (tests/test_web.py) — FastAPI TestClient over state, scan, state-change (persisted across rescan), validation, ServiceNow, the API-token guard, and rate limiting (429 on flood, healthz unthrottled).",
     "Rate limiter (tests/test_ratelimit.py) — token-bucket burst/refill, per-client isolation, idle eviction.",
     "Adversarial / robustness (tests/test_security.py) — the ATLAS-aligned threat model's guards: injection text carried as data only, a hostile model response can't invent findings or inflate scores (id allow-listing, score clamping, enum fallback), poisoned feedback stays within the cap and never overrides the KEV floor.",
-    "All tests run offline with no Anthropic key; AI stages are validated by contract (schema) rather than live calls. CI (.github/workflows/ci.yml) runs ruff + mypy + pytest on a 3.10-3.12 matrix and builds the image on every push/PR; mypy is a clean gate and the package ships py.typed.",
+    "All tests run offline with no Anthropic key; AI stages are validated by contract (schema) rather than live calls. CI (.github/workflows/ci.yml) runs ruff + mypy + pytest on a 3.10-3.12 matrix, builds the image, and runs a supply-chain job (pip-audit dependency scan + CycloneDX SBOM artifact) on every push/PR; mypy is a clean gate and the package ships py.typed.",
   ]),
 
   H1("13. Configuration surface"),

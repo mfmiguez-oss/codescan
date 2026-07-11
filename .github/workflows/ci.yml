@@ -33,6 +33,34 @@ jobs:
       - name: pytest
         run: pytest -q
 
+  supply-chain:
+    name: dependency audit · SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install (with providers + extras for a complete dependency graph)
+        run: pip install -e ".[dev,providers,vault,sql]"
+      - name: Dependency vulnerability audit (pip-audit)
+        # codescan scans others; it must scan its own dependencies. Non-blocking
+        # for now (advisory) so a new upstream CVE doesn't wedge the pipeline;
+        # tighten to a gate once the baseline is clean.
+        run: |
+          pip install pip-audit
+          pip-audit --strict --desc || echo "::warning::pip-audit reported findings (advisory)"
+      - name: Generate CycloneDX SBOM
+        run: |
+          pip install cyclonedx-bom
+          cyclonedx-py environment --output-format JSON --outfile sbom.json
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codescan-sbom
+          path: sbom.json
+
   docker:
     name: docker build
     runs-on: ubuntu-latest

@@ -855,9 +855,10 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
 
 All tests run offline with no Anthropic key. The AI stages are integration
 points validated by contract (schema) rather than live calls. **CI**
-(`.github/workflows/ci.yml`) runs ruff + mypy + pytest on a 3.10–3.12 matrix and
-builds the image on every push/PR; `mypy` is a clean gate and the package ships
-`py.typed`.
+(`.github/workflows/ci.yml`) runs ruff + mypy + pytest on a 3.10–3.12 matrix,
+builds the image, and runs a **supply-chain job** (a `pip-audit` dependency
+vulnerability scan and a CycloneDX SBOM artifact) on every push/PR; `mypy` is a
+clean gate and the package ships `py.typed`.
 
 ---
 

@@ -8,6 +8,16 @@ organization's to operate. Companion documents:
 (framework-by-framework review), [DESIGN.md](DESIGN.md) (architecture and
 rationale), [RELEASING.md](RELEASING.md) (change and release procedure).
 
+## 0. Governance basics — ownership, intended use, incident response
+
+| Element | Statement |
+|---|---|
+| **Accountable owner** | The **Application Security Engineering** function (the DESIGN.md document owner) is accountable for codescan's AI risk: model routing choices, scoring-weight and threshold changes, review of drift alerts, and sign-off on releases per [RELEASING.md](RELEASING.md). In a deploying organization this maps to the team that operates the vulnerability-management program. |
+| **Intended use** | Aggregate, deduplicate, and **prioritize** vulnerability findings from existing scanners, and propose triage states, to feed a human-reviewed ServiceNow VR queue. It is a **decision-support** tool for security analysts. |
+| **Out-of-scope use** | Not an autonomous remediation system, not a source-code SAST replacement, not a substitute for the scanners it aggregates, and **not an authority to auto-close findings** — every closure is a human decision. Outputs are advisory risk scores, not compliance attestations. |
+| **AI-incident response** | An AI-specific failure — e.g. a `calibration.drift` alert, a spike in `scan.truncated`, or suspected model manipulation — is handled as: (1) the audit event reaches the SIEM; (2) the accountable owner reviews the calibration report and recent triage; (3) mitigation options are `--no-ai` (fall back to deterministic scoring, which always stands), pinning/rerouting the model (`ai.model` / per-task routing), or disabling OpenHack; (4) the change follows the [RELEASING.md](RELEASING.md) emergency path. The deterministic pipeline and human-in-the-loop mean an AI failure degrades gracefully rather than blocking triage. |
+| **Bias / fairness** | The system scores **software vulnerabilities, not people**. No personal attributes enter any model input (verifiable in the [DATAFLOW.md](DATAFLOW.md) §3 data-out column). The only fairness-adjacent surface is uneven scoring quality *across weakness families or repos*; this is measured directly and continuously by the calibration report (per-CWE / per-component confirm rates and the noisy-keys list), so systematic mis-scoring of a category is detected rather than assumed absent. |
+
 ## 1. Dataflow diagrams and process flow documentation
 
 | Control element | Evidence |
@@ -40,6 +50,7 @@ rationale), [RELEASING.md](RELEASING.md) (change and release procedure).
 | Reproducibility, testing | Full test suite runs offline and deterministic (no network, no API keys) against committed fixtures; CI runs it on every push across Python 3.10–3.12 |
 | Environments / containerization | `Dockerfile`, `docker-compose.yml` (dev) and `docker-compose.prod.yml`; CI builds the image on every push |
 | Automated tools | GitHub Actions ([ci.yml](../.github/workflows/ci.yml)): ruff + mypy (clean gate) + pytest + image build |
+| Supply-chain security | CI runs a dependency vulnerability audit (`pip-audit`) and generates a **CycloneDX SBOM** (uploaded as a build artifact) on every push — codescan scans others' dependencies, so it audits its own. Python deps are version-pinned in `pyproject.toml`. Model-provider supply chain remains contractual (see residuals) |
 | Approval and release procedures | [RELEASING.md](RELEASING.md) — including the recommended multi-maintainer hardening (branch protection, required reviews) |
 
 ## 4. Change management
