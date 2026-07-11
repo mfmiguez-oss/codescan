@@ -73,14 +73,20 @@ class FeedbackModel:
                 bucket.setdefault(key, set()).add(fid)
         return m
 
-    def delta(self, finding: Finding, cfg: FeedbackConfig) -> tuple[float, str]:
-        """Bounded score delta + reason for `finding`, from prior decisions on the
-        same weakness/component (excluding the finding's own past decision)."""
+    def evidence(self, finding: Finding) -> tuple[set[str], set[str]]:
+        """Ids of prior manual decisions on the same weakness/component:
+        (confirmed, false_positive) — excluding the finding's own past decision."""
         pos: set[str] = set()
         neg: set[str] = set()
         for key in _finding_keys(finding):
             pos |= self._pos.get(key, set()) - {finding.id}
             neg |= self._neg.get(key, set()) - {finding.id}
+        return pos, neg
+
+    def delta(self, finding: Finding, cfg: FeedbackConfig) -> tuple[float, str]:
+        """Bounded score delta + reason for `finding`, from prior decisions on the
+        same weakness/component (excluding the finding's own past decision)."""
+        pos, neg = self.evidence(finding)
         total = len(pos) + len(neg)
         if total < cfg.min_evidence:
             return 0.0, ""
@@ -94,6 +100,29 @@ class FeedbackModel:
                   f"({len(pos)} confirmed, {len(neg)} false-positive on related "
                   f"weakness/component)")
         return delta, reason
+
+
+class TriageHistory:
+    """Prior manual accuracy decisions packaged as grounded facts for the AI prompt.
+
+    Where the feedback prior (`apply_feedback`) adjusts scores *after* the AI
+    stage, this puts the same org ground truth *into* the model's reasoning: a
+    finding's prompt digest gains the counts of how analysts triaged similar
+    findings (same weakness family / component). Unlike the blind prior, the
+    model can judge whether the history applies to *this* instance — and it is
+    told to treat it as context, never as a verdict (see exploitability.py).
+    """
+
+    def __init__(self, store: StateStoreBase) -> None:
+        self._model = FeedbackModel.from_store(store)
+
+    def context(self, finding: Finding) -> dict | None:
+        """Counts of similar manual decisions, or None when there is no history
+        (so findings without history add nothing to the prompt)."""
+        pos, neg = self._model.evidence(finding)
+        if not pos and not neg:
+            return None
+        return {"confirmed": len(pos), "false_positive": len(neg)}
 
 
 def apply_feedback(

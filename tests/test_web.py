@@ -274,6 +274,17 @@ def test_servicenow_format_config(tmp_path):
     assert client.post("/api/config", json={"servicenow": {"format": "xml"}}).status_code == 400
 
 
+def test_feedback_config_round_trip(tmp_path):
+    client = _client(tmp_path)
+    body = client.get("/api/config").json()
+    assert body["feedback"] == {"enabled": True, "prompt_history": True}
+
+    updated = client.post("/api/config", json={
+        "feedback": {"enabled": True, "prompt_history": False},
+    }).json()
+    assert updated["feedback"]["prompt_history"] is False
+
+
 def test_threat_model_toggle_and_state(tmp_path):
     client = _client(tmp_path)
     body = client.post("/api/config", json={"threat_model": {"enabled": True}}).json()

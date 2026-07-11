@@ -292,6 +292,18 @@ It's deliberately conservative and **explainable**:
 
 On by default; toggle in the Config tab (`feedback.enabled`).
 
+### Triage history in the AI prompt
+
+The same history also feeds the model directly (`feedback.prompt_history`, on
+by default): each finding sent to the exploitability engine carries
+`prior_analyst_decisions` — how many similar findings (same CWE family or
+component) this org's analysts confirmed vs dismissed. Where the score prior
+corrects the output *after* the fact, this puts the ground truth *into* the
+reasoning: the model can weigh the history where it transfers, explain in the
+rationale when it influenced the judgement, and disregard it where the instance
+differs — and it is instructed never to let history override grounded facts
+like KEV or reachability.
+
 ### Score calibration — is the scoring actually right?
 
 Every decision the store persists also freezes a **snapshot of what the machine

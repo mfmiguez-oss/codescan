@@ -30,7 +30,7 @@ from .dedup import deduplicate
 from .dedup_ai import SemanticDeduper
 from .enrich import build_enrichers, run_enrichment
 from .exploitability import ExploitabilityEngine
-from .feedback import apply_feedback
+from .feedback import TriageHistory, apply_feedback
 from .llm import LLMClient, ModelRouter
 from .models import Finding, Repo, ThreatModel
 from .openhack_runner import OpenHackRunner
@@ -176,10 +176,18 @@ class Pipeline:
             enrichers = build_enrichers(self.cfg.enrichment, llm=llm, offline=self.offline)
             run_enrichment(findings, enrichers)
 
+        # Opened before the AI stage so the org's triage history can inform the
+        # model's reasoning; the same store later feeds the score prior and
+        # persists this run's states.
+        store = open_state_store(self.cfg.storage, state_path)
+
         chains: list[dict] = []
         if llm:
+            history = (TriageHistory(store)
+                       if self.cfg.feedback.enabled and self.cfg.feedback.prompt_history
+                       else None)
             with _stage(run_id, "exploitability"):
-                chains = ExploitabilityEngine(llm).assess(findings)  # deep tier
+                chains = ExploitabilityEngine(llm, history=history).assess(findings)  # deep tier
             logger.info("scan %s: %d attack chains", run_id, len(chains))
 
         # Threat modeling runs before scoring so it can feed back in: it enriches
@@ -196,7 +204,6 @@ class Pipeline:
 
         Scorer(self.cfg.scoring).score(findings, chains)
 
-        store = open_state_store(self.cfg.storage, state_path)
         # Calibrate scores from the org's accumulated confirm/false-positive history
         # (built from the store as loaded, i.e. prior decisions) before this run's
         # states are recorded.

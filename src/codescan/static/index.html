@@ -682,6 +682,7 @@ function renderConfig() {
       <h4>Analyst feedback</h4>
       <p class="hint">Learn from your confirm / false-positive decisions to nudge the risk score of new, similar findings (same weakness family or component). Bounded and explainable — adjusted findings carry a <span class="badge">feedback</span> tag and a reason. No-op until there's triage history.</p>
       <div class="formrow"><label>Enable feedback loop</label><input type="checkbox" id="fb-enabled" ${(c.feedback && c.feedback.enabled) ? 'checked' : ''}/></div>
+      <div class="formrow"><label title="Include prior confirm/false-positive decisions on similar findings in the AI exploitability prompt">Triage history in AI prompt</label><input type="checkbox" id="fb-prompt-history" ${(c.feedback && c.feedback.prompt_history) ? 'checked' : ''}/></div>
     </div>
     <div class="card">
       <h4>OpenHack (whitebox source review)</h4>
@@ -743,7 +744,7 @@ async function saveConfig() {
     ai: { provider: $('#ai-provider').value, model: $('#ai-model').value, effort: $('#ai-effort').value, max_tokens: Number($('#ai-max').value), max_concurrency: Number($('#ai-conc').value), auto_route: $('#ai-auto').checked, batch: $('#ai-batch').checked, tasks },
     enrichment: { kev_enabled: $('#en-kev').checked, epss_enabled: $('#en-epss').checked, reachability_enabled: $('#en-reach').checked, ai_enabled: $('#en-ai').checked },
     threat_model: { enabled: $('#tm-enabled').checked },
-    feedback: { enabled: $('#fb-enabled').checked },
+    feedback: { enabled: $('#fb-enabled').checked, prompt_history: $('#fb-prompt-history').checked },
     openhack: { enabled: $('#oh-enabled').checked, findings_dir: $('#oh-dir').value, repo: $('#oh-repo').value, auto: $('#oh-auto').checked, command: $('#oh-cmd').value, workspace: $('#oh-ws').value, clone: $('#oh-clone').checked, passes: Number($('#oh-passes').value), max_files: Number($('#oh-maxfiles').value), min_confidence: $('#oh-minconf').value },
     source: { provider: $('#scm-provider').value, github_repos: splitList($('#gh-repos').value), github_orgs: splitList($('#gh-orgs').value) },
     scoring: { weights: { severity: Number($('#w-sev').value), exploitability: Number($('#w-exp').value), exposure: Number($('#w-exposure').value), chaining: Number($('#w-chain').value) }, kev_floor: Number($('#kev-floor').value) },

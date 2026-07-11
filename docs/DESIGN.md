@@ -272,6 +272,14 @@ Design points:
 
 - **Grounded, not recalled.** The model receives KEV/EPSS/CVSS/reachability as
   facts, so its judgement is about *our exposure*, not CVE lookup.
+- **Triage history as a grounded fact** (`feedback.prompt_history`, default on).
+  A finding's digest gains `prior_analyst_decisions` — counts of how this org's
+  analysts triaged similar findings (same CWE family / component), built from
+  the state store (`TriageHistory`, feedback.py). The system prompt frames it
+  as organizational context, not a verdict: the model weighs it where it
+  transfers, says so in the rationale, and never lets it override KEV or
+  reachability. This complements the post-hoc score prior (§5.7a) by putting
+  the same ground truth *into* the reasoning.
 - **Structured output.** A JSON Schema (`output_config.format`) guarantees a
   parseable response — no prompt-scraping.
 - **Per-service scoping.** Chaining is scoped to a repo/service. Cross-service
@@ -430,6 +438,14 @@ moves only the *machine score*, never the analyst's state; and a KEV finding is
 never pushed below `kev_floor`. Every adjusted finding records the reason in its
 rationale and a `feedback-adjusted` tag, and the scan's audit event carries the
 adjusted count — nothing is a black box.
+
+The same history also reaches the model directly: `TriageHistory` packages the
+per-finding confirmed/false-positive counts for the exploitability prompt
+(§5.4, `feedback.prompt_history`). The two mechanisms are complementary — the
+prompt context lets the model *reason* with the org's ground truth (and
+discount it when it doesn't transfer to the instance at hand), while the score
+prior remains a deterministic, bounded backstop that works even when the AI
+stage is off.
 
 ### 5.7b Calibration report (`calibration.py`)
 
@@ -747,7 +763,13 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   isolation, syslog smoke, bad-sink survivability).
 - **Feedback loop** (`tests/test_feedback.py`) — false-positive history lowers /
   confirmed raises the score, min-evidence gate, self-exclusion, KEV-floor respect,
-  disabled no-op, accuracy-states-only, and store attribute round-trip.
+  disabled no-op, accuracy-states-only, store attribute round-trip, and
+  `TriageHistory` prompt-context counts (similarity, self-exclusion, accuracy
+  states only).
+- **Exploitability engine** (`tests/test_exploitability.py`) — fake-LLM prompt
+  assembly: results applied to findings/chains, `prior_analyst_decisions`
+  carried with the right counts, and omitted when there's no history or the
+  feature is off.
 - **SQL state store** (`tests/test_state_store_sql.py`) — backend factory,
   round-trip/persistence (incl. snapshots), the manual-not-clobbered-by-machine
   concurrency guard, the pre-snapshot schema upgrading in place, feedback over
@@ -787,7 +809,8 @@ builds the image on every push/PR; `mypy` is a clean gate and the package ships
 - `enrichment` — KEV/EPSS feed URLs + per-enricher toggles.
 - `threat_model` — `enabled`.
 - `scoring` — dimension weights + `kev_floor`.
-- `feedback` — analyst-feedback score prior: `enabled`, `max_adjust`, `min_evidence`.
+- `feedback` — analyst-feedback loop: `enabled`, `max_adjust`, `min_evidence`
+  (score prior), `prompt_history` (triage history into the AI prompt).
 - `storage` — validation-state backend: `backend` (file/sql) + `dsn` (SQLAlchemy URL).
 - `vault` — optional HashiCorp Vault secret source: `enabled`, `address`,
   `auth` (token/approle), `kv_mount`/`kv_version`, `paths`, `override_env`.

@@ -221,3 +221,7 @@ feedback:
   enabled: true
   max_adjust: 15       # cap the +/- score nudge (points)
   min_evidence: 2      # need at least this many prior manual decisions for a weakness/component
+  # Also feed the history into the AI exploitability prompt (prior_analyst_decisions
+  # per finding), so the model reasons with the org's ground truth instead of only
+  # being corrected by it afterwards.
+  prompt_history: true

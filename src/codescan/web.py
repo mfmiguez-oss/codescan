@@ -134,7 +134,8 @@ def sanitized_config(cfg: Config) -> dict:
             "ai_enabled": cfg.enrichment.ai_enabled,
         },
         "threat_model": {"enabled": cfg.threat_model.enabled},
-        "feedback": {"enabled": cfg.feedback.enabled},
+        "feedback": {"enabled": cfg.feedback.enabled,
+                     "prompt_history": cfg.feedback.prompt_history},
         "openhack": {
             "enabled": cfg.openhack.enabled,
             "findings_dir": cfg.openhack.findings_dir,
@@ -227,6 +228,8 @@ def apply_config(cfg: Config, update: dict) -> None:
     fb = update.get("feedback", {})
     if "enabled" in fb:
         cfg.feedback.enabled = bool(fb["enabled"])
+    if "prompt_history" in fb:
+        cfg.feedback.prompt_history = bool(fb["prompt_history"])
 
     oh = update.get("openhack", {})
     _set_bool(cfg.openhack, oh, "enabled")

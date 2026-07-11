@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from codescan.config import FeedbackConfig
-from codescan.feedback import apply_feedback
+from codescan.feedback import TriageHistory, apply_feedback
 from codescan.models import Component, Finding, Location, Source, ValidationState
 from codescan.validation import StateStore
 
@@ -84,6 +84,28 @@ def test_only_manual_accuracy_states_count():
     new = _f("new", cwe=CWE79, score=60)
     assert apply_feedback([new], store, FeedbackConfig(min_evidence=1), kev_floor=85) == 0
     assert new.risk_score == 60.0
+
+
+def test_triage_history_context_counts():
+    store = _store([("a", CWE79, FP), ("b", CWE79, FP), ("c", CWE79, CONF)])
+    ctx = TriageHistory(store).context(_f("new", cwe=CWE79))
+    assert ctx == {"confirmed": 1, "false_positive": 2}
+
+
+def test_triage_history_none_without_similar_decisions():
+    store = _store([("a", CWE79, FP)])
+    history = TriageHistory(store)
+    # Different weakness AND different component -> nothing similar.
+    assert history.context(_f("new", cwe=CWE89, comp="otherpkg")) is None
+    # Self-exclusion: a finding's own past decision is not "history" for it.
+    assert history.context(_f("a", cwe=CWE79)) is None
+
+
+def test_triage_history_ignores_machine_and_lifecycle_states():
+    store = StateStore(None)
+    store.record(_f("m", cwe=CWE79, state=FP), manual=False)  # machine proposal
+    store.record(_f("r", cwe=CWE79, state=ValidationState.risk_accepted), manual=True)
+    assert TriageHistory(store).context(_f("new", cwe=CWE79)) is None
 
 
 def test_component_history_and_store_roundtrip(tmp_path):

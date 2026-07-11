@@ -224,6 +224,7 @@ class FeedbackConfig(_StrictModel):
     enabled: bool = True
     max_adjust: float = 15.0     # cap the +/- score nudge (points on the 0-100 scale)
     min_evidence: int = 2        # need at least this many prior manual decisions for a key
+    prompt_history: bool = True  # also feed the triage history into the AI exploitability prompt
 
 
 class SyslogSinkConfig(_StrictModel):
