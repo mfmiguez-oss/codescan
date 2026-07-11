@@ -1,6 +1,13 @@
-"""Analyst-feedback prior — bounded, explainable score calibration."""
+"""Analyst-feedback prior — bounded, explainable score calibration.
+
+Expected numbers under the default weighting (shrinkage 3, half-life 180 days,
+same-repo boost 2): a fresh same-repo decision weighs 2, so e.g. three unanimous
+false positives give delta = 15 * -6 / (6 + 3) = -10.
+"""
 
 from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
 
 from codescan.config import FeedbackConfig
 from codescan.feedback import TriageHistory, apply_feedback
@@ -12,11 +19,11 @@ FP = ValidationState.false_positive
 CONF = ValidationState.confirmed
 
 
-def _f(fid, *, cwe=None, comp="pkg", score=50.0, kev=False, state=None):
+def _f(fid, *, cwe=None, comp="pkg", score=50.0, kev=False, state=None, repo="a/b"):
     f = Finding(
         id=fid, source=Source.snyk, source_ref="r", title="t",
         cwe_ids=[cwe] if cwe else [],
-        component=Component(name=comp), location=Location(repo="a/b"),
+        component=Component(name=comp), location=Location(repo=repo),
     )
     f.risk_score = score
     f.exploitability.in_kev = kev
@@ -36,7 +43,7 @@ def test_false_positive_history_lowers_score():
     store = _store([("a", CWE79, FP), ("b", CWE79, FP), ("c", CWE79, FP)])
     new = _f("new", cwe=CWE79, score=60)
     assert apply_feedback([new], store, FeedbackConfig(), kev_floor=85) == 1
-    assert new.risk_score == 45.0                     # 60 - 15 (unanimous, capped)
+    assert new.risk_score == 50.0                     # 15 * -6/(6+3) = -10
     assert "feedback-adjusted" in new.tags
     assert "false-positive" in new.exploitability.rationale
 
@@ -45,7 +52,38 @@ def test_confirmed_history_raises_score():
     store = _store([("a", CWE89, CONF), ("b", CWE89, CONF)])
     new = _f("new", cwe=CWE89, score=40)
     apply_feedback([new], store, FeedbackConfig(), kev_floor=85)
-    assert new.risk_score == 55.0                     # 40 + 15
+    assert new.risk_score == 48.6                     # 40 + 15 * 4/(4+3)
+
+
+def test_evidence_volume_grows_confidence():
+    """Shrinkage: 2/2 unanimous swings far less than 20/20 unanimous."""
+    thin = _store([(f"t{i}", CWE79, FP) for i in range(2)])
+    deep = _store([(f"d{i}", CWE79, FP) for i in range(20)])
+    a, b = _f("new", cwe=CWE79, score=60), _f("new", cwe=CWE79, score=60)
+    apply_feedback([a], thin, FeedbackConfig(), kev_floor=85)
+    apply_feedback([b], deep, FeedbackConfig(), kev_floor=85)
+    assert a.risk_score == 51.4                       # -8.6 = 15 * -4/7
+    assert b.risk_score == 46.0                       # -14  = 15 * -40/43 -> near the cap
+    assert (60 - b.risk_score) > (60 - a.risk_score)
+
+
+def test_old_decisions_fade():
+    """Time decay: the same history, two half-lives old, moves the score less."""
+    store = _store([("a", CWE79, FP), ("b", CWE79, FP), ("c", CWE79, FP)])
+    old = (datetime.now(timezone.utc) - timedelta(days=360)).isoformat(timespec="seconds")
+    for entry in store.all_entries().values():
+        entry["decided_at"] = old                     # age the evidence in place
+    new = _f("new", cwe=CWE79, score=60)
+    apply_feedback([new], store, FeedbackConfig(), kev_floor=85)
+    assert new.risk_score == 55.0                     # weights 0.5 each: 15 * -1.5/4.5 = -5
+
+
+def test_same_repo_outweighs_estate_wide():
+    """Repo scoping: identical history counts less for a finding in another repo."""
+    store = _store([("a", CWE79, FP), ("b", CWE79, FP), ("c", CWE79, FP)])   # repo a/b
+    other = _f("new", cwe=CWE79, score=60, repo="x/y")
+    apply_feedback([other], store, FeedbackConfig(), kev_floor=85)
+    assert other.risk_score == 52.5                   # unboosted: 15 * -3/6 = -7.5 (< -10)
 
 
 def test_below_min_evidence_no_change():
@@ -147,4 +185,4 @@ def test_component_history_and_store_roundtrip(tmp_path):
 
     new = _f("new", comp="lodash", score=50)
     apply_feedback([new], reloaded, FeedbackConfig(), kev_floor=85)
-    assert new.risk_score == 35.0                      # -15 via comp:lodash
+    assert new.risk_score == 41.4                      # 15 * -4/7 via comp:lodash

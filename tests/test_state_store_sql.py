@@ -104,7 +104,7 @@ def test_feedback_reads_sql_store(tmp_path):
 
     new = _f("new", cwe="CWE-79", score=60.0)
     assert apply_feedback([new], SqlStateStore(dsn), FeedbackConfig(), kev_floor=85) == 1
-    assert new.risk_score == 45.0                        # -15 from FP history via the SQL prior
+    assert new.risk_score == 50.0                        # 15 * -6/(6+3) via the SQL prior
 
 
 def test_pipeline_persists_to_sql(tmp_path):

@@ -225,6 +225,12 @@ class FeedbackConfig(_StrictModel):
     max_adjust: float = 15.0     # cap the +/- score nudge (points on the 0-100 scale)
     min_evidence: int = 2        # need at least this many prior manual decisions for a key
     prompt_history: bool = True  # also feed the triage history into the AI exploitability prompt
+    # Statistical honesty of the prior: confidence grows with evidence volume
+    # (2/2 unanimous swings far less than 20/20), old decisions fade, and
+    # decisions made in the *same repo* count more than estate-wide ones.
+    shrinkage: float = 3.0       # pseudo-count damping; 0 restores raw-consensus scaling
+    half_life_days: float = 180.0  # decision weight halves every N days; 0 disables decay
+    same_repo_boost: float = 2.0   # weight multiplier for decisions from the finding's repo
 
 
 class SyslogSinkConfig(_StrictModel):

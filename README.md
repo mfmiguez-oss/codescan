@@ -278,11 +278,17 @@ It's deliberately conservative and **explainable**:
 
 - **Bounded** — capped at `feedback.max_adjust` points (default 15) and requires
   `feedback.min_evidence` prior decisions, so a couple of calls can't swing a score.
+- **Statistically honest** — evidence is *weighted*, not just counted: confidence
+  grows with volume (`feedback.shrinkage` pseudo-count damping — two unanimous
+  decisions move a score far less than twenty), old decisions fade
+  (`feedback.half_life_days`, weight halves per half-life), and decisions made in
+  the **same repo** as the new finding outweigh estate-wide precedent
+  (`feedback.same_repo_boost`).
 - **Transparent** — every adjusted finding gets a plain-language reason in its
-  rationale ("score lowered 15 by analyst-feedback prior — 0 confirmed, 3
-  false-positive on related weakness/component"), a **`feedback-adjusted`** tag
-  (a `feedback` badge in the queue), and a `feedback_adjusted` count in the scan's
-  audit event.
+  rationale ("score lowered 10 by analyst-feedback prior — 0 confirmed, 3
+  false-positive on related weakness/component; recency- and repo-weighted"), a
+  **`feedback-adjusted`** tag (a `feedback` badge in the queue), and a
+  `feedback_adjusted` count in the scan's audit event.
 - **Safe** — it only moves the *machine score*, never an analyst's validation
   state; a finding never counts toward adjusting itself; and an actively-exploited
   (KEV) finding is never pushed below `kev_floor`.

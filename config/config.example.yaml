@@ -225,3 +225,8 @@ feedback:
   # per finding), so the model reasons with the org's ground truth instead of only
   # being corrected by it afterwards.
   prompt_history: true
+  # Evidence weighting: confidence grows with volume (shrinkage pseudo-count),
+  # old decisions fade (half-life), and same-repo decisions outweigh estate-wide.
+  shrinkage: 3         # 0 restores raw-consensus scaling
+  half_life_days: 180  # a decision's weight halves every N days; 0 disables decay
+  same_repo_boost: 2   # weight multiplier for decisions from the finding's repo

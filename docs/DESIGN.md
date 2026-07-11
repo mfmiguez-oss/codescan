@@ -432,13 +432,22 @@ rather than scoring every run identically. This is the feedback loop that a
 deterministic-plus-LLM system otherwise lacks.
 
 It is deliberately conservative and explainable: the adjustment is capped
-(`feedback.max_adjust`) and gated on a minimum sample (`feedback.min_evidence`); it
-scales with consensus (unanimous history → full cap); a finding never contributes to
-adjusting itself; only accuracy states count (not `risk_accepted`/`resolved`); it
-moves only the *machine score*, never the analyst's state; and a KEV finding is
-never pushed below `kev_floor`. Every adjusted finding records the reason in its
-rationale and a `feedback-adjusted` tag, and the scan's audit event carries the
-adjusted count — nothing is a black box.
+(`feedback.max_adjust`) and gated on a minimum sample (`feedback.min_evidence`); a
+finding never contributes to adjusting itself; only accuracy states count (not
+`risk_accepted`/`resolved`); it moves only the *machine score*, never the
+analyst's state; and a KEV finding is never pushed below `kev_floor`. Every
+adjusted finding records the reason in its rationale and a `feedback-adjusted`
+tag, and the scan's audit event carries the adjusted count — nothing is a black
+box.
+
+Evidence is **weighted, not just counted** — the delta is
+`max_adjust · (W₊ − W₋) / (W₊ + W₋ + shrinkage)`, where each prior decision's
+weight is decayed by age (halving every `feedback.half_life_days`; legacy
+decisions without a timestamp count as one half-life old) and boosted when it
+was made in the *same repo* as the new finding (`feedback.same_repo_boost`).
+The shrinkage pseudo-count keeps thin evidence humble: two unanimous decisions
+nudge, twenty approach the cap. Setting `shrinkage: 0`, `half_life_days: 0`
+restores the raw-consensus behavior.
 
 The same history also reaches the model directly: `TriageHistory` packages the
 per-finding confirmed/false-positive counts — plus up to three most-recent
@@ -771,7 +780,8 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   isolation, syslog smoke, bad-sink survivability).
 - **Feedback loop** (`tests/test_feedback.py`) — false-positive history lowers /
   confirmed raises the score, min-evidence gate, self-exclusion, KEV-floor respect,
-  disabled no-op, accuracy-states-only, store attribute round-trip, and
+  disabled no-op, accuracy-states-only, store attribute round-trip, evidence
+  weighting (shrinkage growth, time decay, same-repo boost), and
   `TriageHistory` prompt-context counts (similarity, self-exclusion, accuracy
   states only) and analyst notes (labeled, most-recent-first, capped).
 - **Exploitability engine** (`tests/test_exploitability.py`) — fake-LLM prompt
@@ -817,8 +827,9 @@ builds the image on every push/PR; `mypy` is a clean gate and the package ships
 - `enrichment` — KEV/EPSS feed URLs + per-enricher toggles.
 - `threat_model` — `enabled`.
 - `scoring` — dimension weights + `kev_floor`.
-- `feedback` — analyst-feedback loop: `enabled`, `max_adjust`, `min_evidence`
-  (score prior), `prompt_history` (triage history into the AI prompt).
+- `feedback` — analyst-feedback loop: `enabled`, `max_adjust`, `min_evidence`,
+  `shrinkage`, `half_life_days`, `same_repo_boost` (score prior),
+  `prompt_history` (triage history into the AI prompt).
 - `storage` — validation-state backend: `backend` (file/sql) + `dsn` (SQLAlchemy URL).
 - `vault` — optional HashiCorp Vault secret source: `enabled`, `address`,
   `auth` (token/approle), `kv_mount`/`kv_version`, `paths`, `override_env`.

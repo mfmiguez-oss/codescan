@@ -7,6 +7,14 @@ bounded, *explainable* prior: if analysts have repeatedly dismissed findings of 
 given weakness family (CWE) or component as false positives, a new finding sharing
 that trait is nudged **down**; a repeatedly-confirmed trait nudges **up**.
 
+The prior is statistically honest about its evidence:
+  * **Shrinkage** (`feedback.shrinkage`) — pseudo-count damping, so confidence
+    grows with volume: two unanimous decisions move a score far less than twenty.
+  * **Time decay** (`feedback.half_life_days`) — a decision's weight halves every
+    half-life; a component dismissed two years and four versions ago barely votes.
+  * **Repo scoping** (`feedback.same_repo_boost`) — a decision made in the *same
+    repo* as the new finding outweighs estate-wide precedent.
+
 Design constraints, deliberately conservative:
   * **Bounded** — the adjustment is capped at `feedback.max_adjust` points and
     requires `feedback.min_evidence` prior decisions, so a couple of calls can't
@@ -23,6 +31,7 @@ Design constraints, deliberately conservative:
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 from .config import FeedbackConfig
 from .models import Finding, ValidationState
@@ -54,21 +63,25 @@ def _entry_keys(entry: dict) -> list[str]:
 
 class FeedbackModel:
     """Per-key tallies of manual confirmed vs false-positive decisions (by finding
-    id, so a finding can be excluded from adjusting itself)."""
+    id, so a finding can be excluded from adjusting itself), plus per-decision
+    metadata (age, repo) so the delta can weight evidence honestly."""
 
     def __init__(self) -> None:
         self._pos: dict[str, set[str]] = {}
         self._neg: dict[str, set[str]] = {}
+        self._meta: dict[str, tuple[str, str]] = {}   # fid -> (decided_at, repo)
 
     @classmethod
     def from_store(cls, store: StateStoreBase) -> "FeedbackModel":
         m = cls()
         for fid, entry in store.all_entries().items():
-            if not entry.get("manual"):
+            if not entry.get("manual") or fid.startswith("chain:"):
                 continue
             bucket = m._pos if entry["state"] == _POSITIVE else m._neg if entry["state"] == _NEGATIVE else None
             if bucket is None:
                 continue
+            snapshot = entry.get("snapshot") or {}
+            m._meta[fid] = (entry.get("decided_at", ""), snapshot.get("repo", ""))
             for key in _entry_keys(entry):
                 bucket.setdefault(key, set()).add(fid)
         return m
@@ -83,22 +96,48 @@ class FeedbackModel:
             neg |= self._neg.get(key, set()) - {finding.id}
         return pos, neg
 
-    def delta(self, finding: Finding, cfg: FeedbackConfig) -> tuple[float, str]:
+    def _weight(self, fid: str, finding: Finding, cfg: FeedbackConfig,
+                now: datetime) -> float:
+        """Evidence weight of one prior decision: recency-decayed, same-repo-boosted."""
+        decided_at, repo = self._meta.get(fid, ("", ""))
+        w = 1.0
+        if cfg.half_life_days > 0:
+            age_days = cfg.half_life_days     # unknown age (legacy) -> one half-life
+            if decided_at:
+                try:
+                    age_days = max(0.0, (now - datetime.fromisoformat(decided_at))
+                                   .total_seconds() / 86400)
+                except (ValueError, TypeError):
+                    pass      # unparseable/naive timestamp -> keep the legacy default
+            w *= 0.5 ** (age_days / cfg.half_life_days)
+        if repo and repo == finding.location.repo:
+            w *= max(1.0, cfg.same_repo_boost)
+        return w
+
+    def delta(self, finding: Finding, cfg: FeedbackConfig,
+              now: datetime | None = None) -> tuple[float, str]:
         """Bounded score delta + reason for `finding`, from prior decisions on the
         same weakness/component (excluding the finding's own past decision)."""
         pos, neg = self.evidence(finding)
         total = len(pos) + len(neg)
         if total < cfg.min_evidence:
             return 0.0, ""
-        # Scale by the strength of consensus: unanimous -> full ±max_adjust.
-        delta = cfg.max_adjust * (len(pos) - len(neg)) / total
+        now = now or datetime.now(timezone.utc)
+        wpos = sum(self._weight(fid, finding, cfg, now) for fid in pos)
+        wneg = sum(self._weight(fid, finding, cfg, now) for fid in neg)
+        denom = wpos + wneg + max(0.0, cfg.shrinkage)
+        if denom <= 0:
+            return 0.0, ""
+        # Shrinkage keeps thin evidence humble: the delta approaches ±max_adjust
+        # only as (weighted) unanimous evidence outgrows the pseudo-count.
+        delta = cfg.max_adjust * (wpos - wneg) / denom
         delta = max(-cfg.max_adjust, min(cfg.max_adjust, round(delta, 1)))
         if abs(delta) < 0.5:
             return 0.0, ""
         verb = "raised" if delta > 0 else "lowered"
         reason = (f"score {verb} {abs(delta):.0f} by analyst-feedback prior "
                   f"({len(pos)} confirmed, {len(neg)} false-positive on related "
-                  f"weakness/component)")
+                  f"weakness/component; recency- and repo-weighted)")
         return delta, reason
 
 
