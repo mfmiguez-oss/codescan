@@ -1,6 +1,7 @@
 # codescan
 
 [![CI](https://github.com/mfmiguez-oss/codescan/actions/workflows/ci.yml/badge.svg)](https://github.com/mfmiguez-oss/codescan/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 An enterprise code-scanning pipeline that ingests vulnerability findings from
 **Snyk** and **JFrog Xray** across repositories in a **local Bitbucket**
@@ -757,3 +758,9 @@ scoring, validation states, ServiceNow record shape, and persisted closures.
 - **Human in the loop.** The pipeline *proposes* validation states; analysts
   confirm/override in ServiceNow. Closed states (false positive, risk accepted,
   resolved) are persisted and survive rescans.
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE) (see also
+[NOTICE](NOTICE)). Apache-2.0 is permissive and includes an explicit patent
+grant and contribution terms, which suits enterprise adoption.
