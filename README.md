@@ -349,6 +349,14 @@ View it in the UI's **Calibration** tab (`GET /api/calibration`) or run
 `codescan calibration`. It also makes model/provider changes measurable: change
 `ai.model` (or a task route), let triage accumulate, and compare.
 
+The report is also an **automated control**: every scan re-grades the
+accumulated history and, when calibration degrades past the configured
+thresholds (`calibration:` in config — high-bucket confirm rate, score
+separation, each gated on a minimum evidence count), emits a
+`calibration.drift` **audit event that fans out to the SIEM sinks**, logs a
+warning, flags it in the Calibration tab, and prints it from the CLI. Drift
+pages someone instead of waiting to be noticed in a report.
+
 ## Install
 
 ```bash

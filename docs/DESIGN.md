@@ -498,6 +498,16 @@ on the CLI. Because the snapshot captures what the *configured* pipeline
 predicted, the report also makes provider/model routing changes (§5.5)
 empirically comparable over time.
 
+**Drift alerting** (`drift_alerts`, thresholds in `calibration:` config) turns
+the pull-based report into a continuous-monitoring control. After each scan the
+pipeline re-grades the history and raises a `calibration.drift` audit event —
+fanning out to the SIEM sinks like every audit event — when either check trips:
+the 80–100 bucket's confirm rate falls below `min_high_confirm_rate`, or the
+confirmed-vs-false-positive mean-score gap falls below `min_separation`. Both
+checks stay silent below `min_bucket_decisions` of evidence, so a cold store or
+a couple of contrarian decisions can't page anyone. Alerts also surface in the
+Calibration tab and the CLI report.
+
 ### 5.8 ServiceNow export (`servicenow.py`)
 
 Builds `sn_vul_vulnerable_item` records, highest-risk first (VR queue order),
@@ -812,8 +822,10 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   the SQL store, and a pipeline run persisting to SQLite.
 - **Calibration** (`tests/test_calibration.py`) — bucket/rate math, accuracy
   states only, noisy-key surfacing, legacy decisions counted but unbucketed,
-  chain decisions excluded, and the empty-store zeroed report; endpoint coverage
-  in `test_web.py`.
+  chain decisions excluded, the empty-store zeroed report, and drift alerts
+  (precision + separation checks, evidence gate, disabled/healthy silence);
+  endpoint coverage in `test_web.py`, and the scan-time `calibration.drift`
+  audit event in `test_pipeline.py`.
 - **Enterprise / Fable 5** (`tests/test_enterprise.py`) — `inference_geo` threaded
   onto requests, Fable's data-retention 400 re-raised actionably, and the
   enterprise config profile routing deep tasks to Fable / mechanical to Haiku.
@@ -849,6 +861,8 @@ builds the image on every push/PR; `mypy` is a clean gate and the package ships
 - `feedback` — analyst-feedback loop: `enabled`, `max_adjust`, `min_evidence`,
   `shrinkage`, `half_life_days`, `same_repo_boost` (score prior),
   `prompt_history` (triage history into the AI prompt).
+- `calibration` — drift alerting: `alerts_enabled`, `min_bucket_decisions`,
+  `min_high_confirm_rate`, `min_separation`.
 - `storage` — validation-state backend: `backend` (file/sql) + `dsn` (SQLAlchemy URL).
 - `vault` — optional HashiCorp Vault secret source: `enabled`, `address`,
   `auth` (token/approle), `kv_mount`/`kv_version`, `paths`, `override_env`.

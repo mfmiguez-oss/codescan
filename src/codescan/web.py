@@ -24,7 +24,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 from .audit import AuditLog
-from .calibration import calibration_report
+from .calibration import calibration_report, drift_alerts
 from .config import Config, TaskModel
 from .logging_setup import configure
 from .models import SERVICENOW_STATE, Finding, ValidationState
@@ -136,6 +136,7 @@ def sanitized_config(cfg: Config) -> dict:
         "threat_model": {"enabled": cfg.threat_model.enabled},
         "feedback": {"enabled": cfg.feedback.enabled,
                      "prompt_history": cfg.feedback.prompt_history},
+        "calibration": {"alerts_enabled": cfg.calibration.alerts_enabled},
         "openhack": {
             "enabled": cfg.openhack.enabled,
             "findings_dir": cfg.openhack.findings_dir,
@@ -230,6 +231,10 @@ def apply_config(cfg: Config, update: dict) -> None:
         cfg.feedback.enabled = bool(fb["enabled"])
     if "prompt_history" in fb:
         cfg.feedback.prompt_history = bool(fb["prompt_history"])
+
+    cal = update.get("calibration", {})
+    if "alerts_enabled" in cal:
+        cfg.calibration.alerts_enabled = bool(cal["alerts_enabled"])
 
     oh = update.get("openhack", {})
     _set_bool(cfg.openhack, oh, "enabled")
@@ -554,7 +559,9 @@ def create_app(
     def calibration() -> dict:
         """Score calibration vs manual triage outcomes, from the state store."""
         store = open_state_store(state.cfg.storage, state.state_path)
-        return calibration_report(store)
+        report = calibration_report(store)
+        report["alerts"] = drift_alerts(report, state.cfg.calibration)
+        return report
 
     @app.get("/api/servicenow")
     def servicenow() -> dict:

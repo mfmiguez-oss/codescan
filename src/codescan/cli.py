@@ -113,7 +113,7 @@ def calibration(
 ) -> None:
     """Grade past risk scores against analysts' confirm / false-positive decisions."""
     configure()
-    from .calibration import calibration_report
+    from .calibration import calibration_report, drift_alerts
     from .validation import open_state_store
 
     cfg = Config.load(config)
@@ -123,6 +123,9 @@ def calibration(
         console.print("No manual confirmed/false-positive decisions recorded yet — "
                       "triage findings in the UI (or ServiceNow) and re-run.")
         return
+
+    for alert in drift_alerts(report, cfg.calibration):
+        console.print(f"[bold red]⚠ DRIFT[/bold red] {alert}")
 
     rate = f"{report['confirm_rate']:.0%}" if report["confirm_rate"] is not None else "—"
     console.print(f"[bold]codescan calibration[/bold]: {report['decisions']} manual decisions "

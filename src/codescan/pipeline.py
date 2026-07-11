@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .audit import AuditLog
+from .calibration import calibration_report, drift_alerts
 from .config import Config
 from .connectors import (
     BitbucketConnector, GitHubConnector, OpenHackConnector, SnykConnector, XrayConnector,
@@ -218,6 +219,14 @@ class Pipeline:
         n_feedback = apply_feedback(findings, store, self.cfg.feedback, self.cfg.scoring.kev_floor)
         assign_states(findings, store)
         store.save()
+
+        # Continuous calibration monitoring: grade the accumulated predictions
+        # against analyst outcomes and raise drift as audit events (which fan
+        # out to the SIEM sinks), so degradation pages someone instead of
+        # waiting to be noticed in the report.
+        for alert in drift_alerts(calibration_report(store), self.cfg.calibration):
+            logger.warning("scan %s: calibration drift — %s", run_id, alert)
+            audit.record("calibration.drift", actor=actor, run_id=run_id, alert=alert)
 
         exporter = ServiceNowExporter(self.cfg.servicenow)
         items = exporter.export(findings, counted, out_path)

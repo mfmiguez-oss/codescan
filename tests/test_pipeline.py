@@ -85,6 +85,34 @@ def test_servicenow_records(tmp_path):
     assert all(r["state"] for r in items)
 
 
+def test_calibration_drift_raises_audit_event(tmp_path):
+    """A store where high-scored predictions were mostly dismissed must surface
+    a calibration.drift audit event on the next scan (the SIEM alert path)."""
+    import json
+
+    from codescan.models import Component, Finding, Location, Source, ValidationState
+    from codescan.validation import StateStore
+
+    store = StateStore(tmp_path / "state.json")
+    for i in range(5):
+        f = Finding(
+            id=f"seed{i}", source=Source.snyk, source_ref="r", title="t",
+            cwe_ids=["CWE-9999"], component=Component(name="seedpkg"),
+            location=Location(repo="seed/repo"),
+        )
+        f.risk_score = 90.0
+        f.validation_state = ValidationState.false_positive
+        store.record(f, manual=True)
+    store.save()
+
+    _run(tmp_path)
+
+    events = [json.loads(line)
+              for line in (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()]
+    drift = [e for e in events if e["event"] == "calibration.drift"]
+    assert drift and "high-score precision drift" in drift[0]["alert"]
+
+
 def test_persistent_state_survives_rerun(tmp_path):
     result = _run(tmp_path)
     state_file = tmp_path / "state.json"

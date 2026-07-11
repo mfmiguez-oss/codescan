@@ -230,3 +230,14 @@ feedback:
   shrinkage: 3         # 0 restores raw-consensus scaling
   half_life_days: 180  # a decision's weight halves every N days; 0 disables decay
   same_repo_boost: 2   # weight multiplier for decisions from the finding's repo
+
+# Calibration drift alerting: each scan grades past risk scores against analysts'
+# confirm / false-positive decisions; if calibration degrades past these thresholds
+# the scan emits a `calibration.drift` audit event (forwarded to the SIEM sinks)
+# and the UI Calibration tab shows the alert. Checks stay silent below
+# min_bucket_decisions of evidence so a cold store can't page anyone.
+calibration:
+  alerts_enabled: true
+  min_bucket_decisions: 5      # evidence needed before a check can fire
+  min_high_confirm_rate: 0.5   # 80-100 bucket confirm rate below this -> drift
+  min_separation: 0.0          # confirmed-vs-FP mean-score gap below this -> drift

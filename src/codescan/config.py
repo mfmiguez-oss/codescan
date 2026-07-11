@@ -233,6 +233,22 @@ class FeedbackConfig(_StrictModel):
     same_repo_boost: float = 2.0   # weight multiplier for decisions from the finding's repo
 
 
+class CalibrationConfig(_StrictModel):
+    """Drift alerting on the score-calibration report (calibration.py).
+
+    The report grades past risk scores against analysts' confirm/false-positive
+    decisions; these thresholds turn it from a pull-based report into an
+    automated control: when calibration degrades, the scan emits a
+    `calibration.drift` audit event (which fans out to the SIEM sinks) and the
+    UI Calibration tab shows the alert.
+    """
+
+    alerts_enabled: bool = True
+    min_bucket_decisions: int = 5      # evidence needed in a bucket before it can alert
+    min_high_confirm_rate: float = 0.5   # 80-100 bucket confirm rate below this -> drift
+    min_separation: float = 0.0          # confirmed-vs-FP mean-score gap below this -> drift
+
+
 class SyslogSinkConfig(_StrictModel):
     """Forward audit events to a syslog collector (the classic SIEM path:
     Splunk/QRadar/ArcSight/rsyslog). Each event is one JSON syslog message."""
@@ -294,6 +310,7 @@ class Config(_StrictModel):
     threat_model: ThreatModelConfig = ThreatModelConfig()
     scoring: ScoringConfig = ScoringConfig()
     feedback: FeedbackConfig = FeedbackConfig()
+    calibration: CalibrationConfig = CalibrationConfig()
     storage: StorageConfig = StorageConfig()
     vault: VaultConfig = VaultConfig()
     audit: AuditConfig = AuditConfig()

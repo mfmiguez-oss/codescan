@@ -140,6 +140,15 @@ def test_calibration_endpoint(tmp_path):
     assert report["confirmed"] == 1 and report["false_positives"] == 1
     # Both decisions carried a score snapshot, so both landed in a bucket.
     assert sum(b["total"] for b in report["buckets"]) == 2
+    # Drift alerting rides the report (silent here: too little evidence).
+    assert report["alerts"] == []
+
+
+def test_calibration_alerts_config_round_trip(tmp_path):
+    client = _client(tmp_path)
+    assert client.get("/api/config").json()["calibration"] == {"alerts_enabled": True}
+    updated = client.post("/api/config", json={"calibration": {"alerts_enabled": False}}).json()
+    assert updated["calibration"]["alerts_enabled"] is False
 
 
 def test_invalid_state_rejected(tmp_path):

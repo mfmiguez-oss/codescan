@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 
-from codescan.calibration import calibration_report
+from codescan.calibration import calibration_report, drift_alerts
+from codescan.config import CalibrationConfig
 from codescan.models import Component, Exploitability, Finding, Location, Source, ValidationState
 from codescan.validation import StateStore
 
@@ -89,6 +90,48 @@ def test_chain_decisions_dont_pollute_the_report(tmp_path):
     report = calibration_report(store)
     assert report["decisions"] == 1                   # only the finding decision counts
     assert report["unscored"] == 0
+
+
+def _drifting_store(tmp_path, *, n_fp=5, score=90.0):
+    """A store where high-scored predictions were mostly dismissed — drift."""
+    store = StateStore(tmp_path / "s.json")
+    for i in range(n_fp):
+        _seed(store, f"fp{i}", ValidationState.false_positive, score=score)
+    return store
+
+
+def test_drift_alert_on_high_bucket_precision(tmp_path):
+    report = calibration_report(_drifting_store(tmp_path))
+    alerts = drift_alerts(report, CalibrationConfig())
+    assert any("high-score precision drift" in a for a in alerts)
+
+
+def test_drift_silent_below_min_evidence(tmp_path):
+    report = calibration_report(_drifting_store(tmp_path, n_fp=3))   # < 5 decisions
+    assert drift_alerts(report, CalibrationConfig()) == []
+
+
+def test_drift_silent_when_disabled_or_healthy(tmp_path):
+    drifting = calibration_report(_drifting_store(tmp_path))
+    assert drift_alerts(drifting, CalibrationConfig(alerts_enabled=False)) == []
+
+    healthy = StateStore(tmp_path / "h.json")
+    for i in range(5):
+        _seed(healthy, f"c{i}", ValidationState.confirmed, score=90.0)
+    for i in range(5):
+        _seed(healthy, f"f{i}", ValidationState.false_positive, score=20.0)
+    assert drift_alerts(calibration_report(healthy), CalibrationConfig()) == []
+
+
+def test_drift_alert_on_collapsed_separation(tmp_path):
+    # Confirmed findings scored *lower* than false positives: inverted signal.
+    store = StateStore(tmp_path / "s.json")
+    for i in range(3):
+        _seed(store, f"c{i}", ValidationState.confirmed, score=30.0)
+    for i in range(3):
+        _seed(store, f"f{i}", ValidationState.false_positive, score=70.0)
+    alerts = drift_alerts(calibration_report(store), CalibrationConfig())
+    assert any("separation collapsed" in a for a in alerts)
 
 
 def test_legacy_decisions_without_snapshot_counted_but_unbucketed(tmp_path):

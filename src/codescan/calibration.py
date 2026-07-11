@@ -27,6 +27,7 @@ snapshots existed still count toward totals but can't be bucketed by score.
 
 from __future__ import annotations
 
+from .config import CalibrationConfig
 from .models import ValidationState
 from .validation import CHAIN_KEY_PREFIX, StateStoreBase
 
@@ -128,3 +129,41 @@ def calibration_report(store: StateStoreBase, *, top_n: int = 5) -> dict:
             if scored["false_positive"] else None),
         "noisy_keys": noisy,
     }
+
+
+def drift_alerts(report: dict, cfg: CalibrationConfig) -> list[str]:
+    """Threshold checks that turn the calibration report into an automated
+    monitoring control. Returns human-readable alert strings (empty = healthy).
+
+    Deliberately conservative: a check only fires with at least
+    `min_bucket_decisions` of evidence behind it, so a cold store or a couple
+    of contrarian decisions can't page anyone.
+    """
+    if not cfg.alerts_enabled:
+        return []
+    alerts: list[str] = []
+
+    # High-confidence precision: findings the pipeline scored 80-100 should be
+    # overwhelmingly confirmed. A low confirm rate there is the clearest sign
+    # the scoring (or the AI stage behind it) has drifted.
+    high = next(b for b in report["buckets"] if b["bucket"] == "80-100")
+    if (high["total"] >= cfg.min_bucket_decisions
+            and high["confirm_rate"] is not None
+            and high["confirm_rate"] < cfg.min_high_confirm_rate):
+        alerts.append(
+            f"high-score precision drift: only {high['confirm_rate']:.0%} of the "
+            f"{high['total']} decisions on findings predicted 80-100 were confirmed "
+            f"(threshold {cfg.min_high_confirm_rate:.0%})")
+
+    # Separation: confirmed findings should carry higher predicted scores than
+    # false positives. A collapsed or inverted gap means the score no longer
+    # discriminates.
+    mc, mf = report["mean_score_confirmed"], report["mean_score_false_positive"]
+    if (report["decisions"] >= cfg.min_bucket_decisions
+            and mc is not None and mf is not None
+            and (mc - mf) < cfg.min_separation):
+        alerts.append(
+            f"score separation collapsed: confirmed decisions averaged {mc} vs "
+            f"{mf} for false positives (gap {mc - mf:+.1f}, threshold "
+            f"{cfg.min_separation:+.1f})")
+    return alerts
