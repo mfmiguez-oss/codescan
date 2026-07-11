@@ -403,9 +403,10 @@ FP; high score/severity → confirmed; else new). A human confirms or overrides.
 
 **Persistence** is the important property. The store persists each decision keyed
 by fingerprint and tags whether a human set it (`manual`), along with the finding's
-weakness/component attributes and a **machine-belief snapshot** — the risk score,
+weakness/component attributes, a **machine-belief snapshot** — the risk score,
 AI exploitability score, EPSS, KEV, reachability, severity, and repo the pipeline
-held at record time, plus a `decided_at` timestamp. Because manual entries are
+held at record time — a `decided_at` timestamp, and the analyst's optional
+one-line **note** ("why"). Because manual entries are
 never overwritten by machine records, an analyst decision keeps the prediction it
 was made against — the ground truth the calibration report (§5.7b) grades. On
 rescan, `assign_states` honors any manual decision or terminal closure and never
@@ -440,12 +441,15 @@ rationale and a `feedback-adjusted` tag, and the scan's audit event carries the
 adjusted count — nothing is a black box.
 
 The same history also reaches the model directly: `TriageHistory` packages the
-per-finding confirmed/false-positive counts for the exploitability prompt
-(§5.4, `feedback.prompt_history`). The two mechanisms are complementary — the
-prompt context lets the model *reason* with the org's ground truth (and
-discount it when it doesn't transfer to the instance at hand), while the score
-prior remains a deterministic, bounded backstop that works even when the AI
-stage is off.
+per-finding confirmed/false-positive counts — plus up to three most-recent
+analyst notes, labeled with their outcome — for the exploitability prompt
+(§5.4, `feedback.prompt_history`). The notes are what make the history
+transferable: "false_positive: vendored test fixture" tells the model *when*
+the precedent applies, where a bare count can't. The two mechanisms are
+complementary — the prompt context lets the model *reason* with the org's
+ground truth (and discount it when it doesn't transfer to the instance at
+hand), while the score prior remains a deterministic, bounded backstop that
+works even when the AI stage is off.
 
 ### 5.7b Calibration report (`calibration.py`)
 
@@ -499,7 +503,10 @@ dependency-free HTML page for the frontend. Endpoints: `GET /api/state`,
 - **Findings** — the triage queue with filters, signal badges, a per-finding
   detail drawer (CVSS vector, EPSS, reachability, provenance, rationale,
   remediation, tags, threats, chains), and inline validation-state editing that
-  persists to the persistent store.
+  persists to the persistent store. The drawer's **Triage** section takes an
+  optional one-line note with the decision — persisted, audited, prefilled on
+  reopen, preserved across quick row-level state changes, and fed to the AI on
+  similar findings (§5.7a).
 - **Threats** — the per-service threat models (§5.10): STRIDE threats with
   linked findings/chains, assets, entry points, trust boundaries, posture, and
   recommendations.
@@ -754,7 +761,8 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   API push path** (posts each record; a failing push doesn't abort the export).
 - **State store** (`tests/test_validation.py`) — atomic save round-trip, no temp
   leftover, crash-during-replace preserves the existing file, machine-belief
-  snapshot capture, and legacy (pre-snapshot) entries loading cleanly.
+  snapshot capture, analyst-note round-trip, and legacy (pre-snapshot) entries
+  loading cleanly.
 - **Vault** (`tests/test_vault.py`) — KV v1/v2 injection, override semantics, auth
   errors, and the `Config.load` wiring (fake client).
 - **Audit log** (`tests/test_audit.py`) — record/tail JSONL round-trip, disabled
@@ -765,7 +773,7 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   confirmed raises the score, min-evidence gate, self-exclusion, KEV-floor respect,
   disabled no-op, accuracy-states-only, store attribute round-trip, and
   `TriageHistory` prompt-context counts (similarity, self-exclusion, accuracy
-  states only).
+  states only) and analyst notes (labeled, most-recent-first, capped).
 - **Exploitability engine** (`tests/test_exploitability.py`) — fake-LLM prompt
   assembly: results applied to findings/chains, `prior_analyst_decisions`
   carried with the right counts, and omitted when there's no history or the

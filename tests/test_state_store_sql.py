@@ -45,11 +45,13 @@ def test_sql_requires_dsn():
 def test_roundtrip_and_persistence(tmp_path):
     dsn = _dsn(tmp_path)
     SqlStateStore(dsn).record(
-        _f("f1", state=ValidationState.confirmed, cwe="CWE-79", comp="lodash"), manual=True)
+        _f("f1", state=ValidationState.confirmed, cwe="CWE-79", comp="lodash"),
+        manual=True, note="reachable from the payment callback")
 
     reloaded = SqlStateStore(dsn).entry("f1")            # a fresh connection sees it
     assert reloaded["state"] == ValidationState.confirmed and reloaded["manual"] is True
     assert reloaded["cwes"] == ["CWE-79"] and reloaded["component"] == "lodash"
+    assert reloaded["note"] == "reachable from the payment callback"
     # The machine-belief snapshot rides along for the calibration report.
     assert reloaded["snapshot"]["risk_score"] == 50.0
     assert reloaded["snapshot"]["repo"] == "a/b"
@@ -73,9 +75,10 @@ def test_pre_snapshot_schema_upgrades_in_place(tmp_path):
     store = SqlStateStore(_dsn(tmp_path))
     old = store.entry("old")                             # legacy row still readable…
     assert old["state"] == ValidationState.confirmed
-    assert old["snapshot"] is None and old["decided_at"] == ""
-    store.record(_f("new"), manual=True)                 # …and new rows get snapshots
-    assert SqlStateStore(_dsn(tmp_path)).entry("new")["snapshot"]["risk_score"] == 50.0
+    assert old["snapshot"] is None and old["decided_at"] == "" and old["note"] == ""
+    store.record(_f("new"), manual=True, note="n")       # …and new rows get snapshots
+    fresh = SqlStateStore(_dsn(tmp_path)).entry("new")
+    assert fresh["snapshot"]["risk_score"] == 50.0 and fresh["note"] == "n"
 
 
 def test_manual_decision_not_clobbered_by_machine(tmp_path):

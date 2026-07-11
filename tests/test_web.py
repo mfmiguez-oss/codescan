@@ -111,15 +111,18 @@ def test_change_validation_state_persists(tmp_path):
     client = _client(tmp_path)
     fid = client.get("/api/state").json()["findings"][0]["id"]
 
-    r = client.post(f"/api/findings/{fid}/state", json={"state": "risk_accepted"})
+    r = client.post(f"/api/findings/{fid}/state",
+                    json={"state": "risk_accepted", "note": "accepted for Q3"})
     assert r.status_code == 200
     assert r.json()["validation_state"] == "risk_accepted"
+    assert r.json()["analyst_note"] == "accepted for Q3"
 
-    # A rescan must preserve the analyst's decision.
+    # A rescan must preserve the analyst's decision — and the note.
     client.post("/api/scan", json={"use_ai": False, "offline": True})
     findings = client.get("/api/state").json()["findings"]
     reran = next(f for f in findings if f["id"] == fid)
     assert reran["validation_state"] == "risk_accepted"
+    assert reran["analyst_note"] == "accepted for Q3"
 
 
 def test_calibration_endpoint(tmp_path):

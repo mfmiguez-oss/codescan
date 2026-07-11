@@ -50,6 +50,25 @@ def test_record_captures_machine_belief_snapshot(tmp_path):
     assert StateStore(path).entry("f1")["decided_at"]     # ISO timestamp recorded
 
 
+def test_analyst_note_round_trip(tmp_path):
+    path = tmp_path / "state.json"
+    store = StateStore(path)
+    f = _finding()
+    f.validation_state = ValidationState.false_positive
+    store.record(f, manual=True, note="  vendored test fixture, never shipped  ")
+    store.save()
+
+    entry = StateStore(path).entry("f1")
+    assert entry["note"] == "vendored test fixture, never shipped"   # stripped
+
+    # A later decision without a note clears it (the caller sends the current
+    # note when it wants to keep it — see web.py changeState).
+    store2 = StateStore(path)
+    store2.record(f, manual=True)
+    store2.save()
+    assert StateStore(path).entry("f1")["note"] == ""
+
+
 def test_legacy_entries_load_without_snapshot(tmp_path):
     path = tmp_path / "state.json"
     path.write_text(json.dumps({
@@ -60,6 +79,7 @@ def test_legacy_entries_load_without_snapshot(tmp_path):
     for fid in ("flat", "pre_snapshot"):
         assert store.entry(fid)["snapshot"] is None
         assert store.entry(fid)["decided_at"] == ""
+        assert store.entry(fid)["note"] == ""
 
 
 def test_save_is_atomic_no_temp_leftover(tmp_path):

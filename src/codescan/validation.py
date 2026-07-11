@@ -70,7 +70,7 @@ class StateStoreBase(ABC):
     @abstractmethod
     def all_entries(self) -> dict[str, dict]: ...
     @abstractmethod
-    def record(self, finding: Finding, *, manual: bool = False) -> None: ...
+    def record(self, finding: Finding, *, manual: bool = False, note: str = "") -> None: ...
     @abstractmethod
     def save(self) -> None: ...
 
@@ -91,7 +91,7 @@ class StateStore(StateStoreBase):
                 if isinstance(val, str):
                     self._entries[fid] = {"state": _coerce_state(val), "manual": True,
                                           "cwes": [], "component": "",
-                                          "snapshot": None, "decided_at": ""}
+                                          "snapshot": None, "decided_at": "", "note": ""}
                 else:
                     self._entries[fid] = {
                         "state": _coerce_state(val["state"]),
@@ -104,6 +104,8 @@ class StateStore(StateStoreBase):
                         # legacy entries have none and are excluded from score buckets.
                         "snapshot": val.get("snapshot"),
                         "decided_at": val.get("decided_at", ""),
+                        # Analyst's one-line "why" (manual decisions only).
+                        "note": val.get("note", ""),
                     }
 
     def entry(self, finding_id: str) -> dict | None:
@@ -116,14 +118,16 @@ class StateStore(StateStoreBase):
         e = self._entries.get(finding_id)
         return e["state"] if e else None
 
-    def record(self, finding: Finding, *, manual: bool = False) -> None:
+    def record(self, finding: Finding, *, manual: bool = False, note: str = "") -> None:
         # Capture the weakness/component so a manual decision can inform the
         # feedback prior for similar findings later (feedback.py), plus the
-        # machine-belief snapshot the calibration report grades against.
+        # machine-belief snapshot the calibration report grades against and the
+        # analyst's one-line reason (prompt context for similar findings).
         self._entries[finding.id] = {
             "state": finding.validation_state, "manual": manual,
             "cwes": list(finding.cwe_ids), "component": finding.component.name,
             "snapshot": _snapshot(finding), "decided_at": _now_iso(),
+            "note": note.strip(),
         }
 
     def save(self) -> None:
@@ -139,6 +143,8 @@ class StateStore(StateStoreBase):
                 e["snapshot"] = v["snapshot"]
             if v.get("decided_at"):
                 e["decided_at"] = v["decided_at"]
+            if v.get("note"):
+                e["note"] = v["note"]
             return e
 
         payload = json.dumps({k: _dump(v) for k, v in self._entries.items()}, indent=2)
@@ -166,7 +172,8 @@ _DDL = (
     " cwes TEXT,"
     " component TEXT,"
     " snapshot TEXT,"
-    " decided_at VARCHAR(40))"
+    " decided_at VARCHAR(40),"
+    " note TEXT)"
 )
 
 # Columns added after the table first shipped; applied one at a time so a
@@ -176,6 +183,7 @@ _DDL = (
 _MIGRATIONS = (
     "ALTER TABLE validation_state ADD COLUMN snapshot TEXT",
     "ALTER TABLE validation_state ADD COLUMN decided_at VARCHAR(40)",
+    "ALTER TABLE validation_state ADD COLUMN note TEXT",
 )
 
 
@@ -213,8 +221,8 @@ class SqlStateStore(StateStoreBase):
         sa = self._sa
         with self._engine.connect() as conn:
             rows = conn.execute(sa.text(
-                "SELECT finding_id, state, manual, cwes, component, snapshot, decided_at"
-                " FROM validation_state"
+                "SELECT finding_id, state, manual, cwes, component, snapshot, decided_at,"
+                " note FROM validation_state"
             )).mappings().all()
         out: dict[str, dict] = {}
         for r in rows:
@@ -225,6 +233,7 @@ class SqlStateStore(StateStoreBase):
                 "component": r["component"] or "",
                 "snapshot": json.loads(r["snapshot"]) if r["snapshot"] else None,
                 "decided_at": r["decided_at"] or "",
+                "note": r["note"] or "",
             }
         return out
 
@@ -238,11 +247,12 @@ class SqlStateStore(StateStoreBase):
         e = self._entries.get(finding_id)
         return e["state"] if e else None
 
-    def record(self, finding: Finding, *, manual: bool = False) -> None:
+    def record(self, finding: Finding, *, manual: bool = False, note: str = "") -> None:
         entry = {
             "state": finding.validation_state, "manual": manual,
             "cwes": list(finding.cwe_ids), "component": finding.component.name,
             "snapshot": _snapshot(finding), "decided_at": _now_iso(),
+            "note": note.strip(),
         }
         self._write(finding.id, entry)
         self._entries[finding.id] = entry
@@ -258,6 +268,7 @@ class SqlStateStore(StateStoreBase):
             "component": entry["component"] or None,
             "snapshot": json.dumps(entry["snapshot"]) if entry.get("snapshot") else None,
             "decided_at": entry.get("decided_at") or None,
+            "note": entry.get("note") or None,
         }
         terminal = [s.value for s in _TERMINAL_CLOSURE_STATES]
         with self._engine.begin() as conn:
@@ -266,7 +277,7 @@ class SqlStateStore(StateStoreBase):
                 updated = conn.execute(sa.text(
                     "UPDATE validation_state SET state=:state, manual=:manual,"
                     " cwes=:cwes, component=:component, snapshot=:snapshot,"
-                    " decided_at=:decided_at WHERE finding_id=:id"), params).rowcount
+                    " decided_at=:decided_at, note=:note WHERE finding_id=:id"), params).rowcount
                 if not updated:
                     self._insert(conn, params)
                 return
@@ -274,7 +285,7 @@ class SqlStateStore(StateStoreBase):
             # terminal) decision; insert if the row is absent.
             stmt = sa.text(
                 "UPDATE validation_state SET state=:state, cwes=:cwes, component=:component,"
-                " snapshot=:snapshot, decided_at=:decided_at"
+                " snapshot=:snapshot, decided_at=:decided_at, note=:note"
                 " WHERE finding_id=:id AND manual=:false AND state NOT IN :terminal"
             ).bindparams(sa.bindparam("terminal", expanding=True))
             updated = conn.execute(stmt, {**params, "false": False, "terminal": terminal}).rowcount
@@ -289,8 +300,9 @@ class SqlStateStore(StateStoreBase):
         try:
             conn.execute(sa.text(
                 "INSERT INTO validation_state"
-                " (finding_id, state, manual, cwes, component, snapshot, decided_at)"
-                " VALUES (:id, :state, :manual, :cwes, :component, :snapshot, :decided_at)"),
+                " (finding_id, state, manual, cwes, component, snapshot, decided_at, note)"
+                " VALUES (:id, :state, :manual, :cwes, :component, :snapshot, :decided_at,"
+                " :note)"),
                 params)
         except sa.exc.IntegrityError:
             pass  # a concurrent writer inserted first — fine, their row stands

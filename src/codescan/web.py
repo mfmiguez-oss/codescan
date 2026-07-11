@@ -297,10 +297,11 @@ def _deep_merge(base: dict, update: dict) -> dict:
     return base
 
 
-def finding_to_dict(f: Finding) -> dict:
+def finding_to_dict(f: Finding, note: str = "") -> dict:
     ex = f.exploitability
     return {
         "id": f.id,
+        "analyst_note": note,
         "title": f.title,
         "cve_ids": f.cve_ids,
         "cwe_ids": f.cwe_ids,
@@ -343,6 +344,7 @@ class ScanRequest(BaseModel):
 
 class StateChange(BaseModel):
     state: str
+    note: str = ""      # optional one-line analyst rationale, persisted with the decision
 
 
 class AppState:
@@ -399,18 +401,26 @@ class AppState:
         self.last_scan = datetime.now(timezone.utc).isoformat(timespec="seconds")
         return self.result
 
-    def set_state(self, fid: str, state: str, *, actor: str = "system") -> Finding:
+    def set_state(self, fid: str, state: str, *, note: str = "", actor: str = "system") -> Finding:
         f = next((x for x in self.result.findings if x.id == fid), None)
         if f is None:
             raise KeyError(fid)
         previous = f.validation_state.value
         f.validation_state = ValidationState(state)     # raises ValueError if invalid
         store = open_state_store(self.cfg.storage, self.state_path)   # merge into existing decisions
-        store.record(f, manual=True)
+        store.record(f, manual=True, note=note)
         store.save()
+        extra = {"note": note.strip()} if note.strip() else {}
         self.audit.record("validation.changed", actor=actor, finding_id=fid,
-                          title=f.title, **{"from": previous, "to": f.validation_state.value})
+                          title=f.title, **{"from": previous, "to": f.validation_state.value},
+                          **extra)
         return f
+
+    def analyst_notes(self) -> dict[str, str]:
+        """Persisted analyst notes by finding id, for display alongside findings."""
+        store = open_state_store(self.cfg.storage, self.state_path)
+        return {fid: e["note"] for fid, e in store.all_entries().items()
+                if e.get("manual") and e.get("note")}
 
     def servicenow_items(self) -> list[dict]:
         return ServiceNowExporter(self.cfg.servicenow).build(
@@ -421,9 +431,10 @@ class AppState:
 def _payload(state: AppState) -> dict:
     r = state.result
     findings = sorted(r.findings, key=lambda x: x.risk_score, reverse=True)
+    notes = state.analyst_notes()
     return {
         "summary": r.summary(),
-        "findings": [finding_to_dict(f) for f in findings],
+        "findings": [finding_to_dict(f, notes.get(f.id, "")) for f in findings],
         "chains": r.chains,
         "threat_models": [tm.model_dump() for tm in r.threat_models],
         "states": [s.value for s in ValidationState],
@@ -494,12 +505,12 @@ def create_app(
     @app.post("/api/findings/{fid}/state")
     def set_state(fid: str, change: StateChange, request: Request) -> dict:
         try:
-            f = state.set_state(fid, change.state, actor=_actor(request))
+            f = state.set_state(fid, change.state, note=change.note, actor=_actor(request))
         except KeyError:
             raise HTTPException(status_code=404, detail="finding not found")
         except ValueError:
             raise HTTPException(status_code=400, detail="invalid validation state")
-        return finding_to_dict(f)
+        return finding_to_dict(f, change.note.strip())
 
     @app.get("/api/audit")
     def audit(limit: int = 200) -> dict:

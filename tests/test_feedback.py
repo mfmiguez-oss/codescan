@@ -108,6 +108,33 @@ def test_triage_history_ignores_machine_and_lifecycle_states():
     assert TriageHistory(store).context(_f("new", cwe=CWE79)) is None
 
 
+def test_triage_history_carries_recent_analyst_notes():
+    store = StateStore(None)
+    store.record(_f("a", cwe=CWE79, state=FP), manual=True, note="vendored fixture")
+    store.record(_f("b", cwe=CWE79, state=CONF), manual=True, note="reachable sink")
+    store.record(_f("c", cwe=CWE79, state=FP), manual=True)            # no note
+
+    ctx = TriageHistory(store).context(_f("new", cwe=CWE79))
+    assert ctx["confirmed"] == 1 and ctx["false_positive"] == 2
+    assert sorted(ctx["analyst_notes"]) == [
+        "confirmed: reachable sink", "false_positive: vendored fixture",
+    ]
+
+
+def test_triage_history_caps_notes():
+    store = StateStore(None)
+    for i in range(5):
+        store.record(_f(f"n{i}", cwe=CWE79, state=FP), manual=True, note=f"note {i}")
+    ctx = TriageHistory(store).context(_f("new", cwe=CWE79))
+    assert len(ctx["analyst_notes"]) == TriageHistory.MAX_NOTES
+
+
+def test_triage_history_omits_notes_key_when_none_left():
+    store = _store([("a", CWE79, FP), ("b", CWE79, FP)])               # no notes
+    ctx = TriageHistory(store).context(_f("new", cwe=CWE79))
+    assert "analyst_notes" not in ctx
+
+
 def test_component_history_and_store_roundtrip(tmp_path):
     store = StateStore(tmp_path / "s.json")
     for fid in ("a", "b"):

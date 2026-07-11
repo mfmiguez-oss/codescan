@@ -307,16 +307,27 @@ function stateSelect(f) {
   return `<select class="state" data-id="${f.id}" onclick="event.stopPropagation()">${opts}</select>`;
 }
 
-async function changeState(id, state) {
+async function changeState(id, state, note) {
+  // A quick state change (row select) keeps whatever note the analyst left;
+  // the drawer's Apply passes the note field explicitly (possibly cleared).
+  if (note === undefined) {
+    const f = DATA.findings.find(x => x.id === id);
+    note = (f && f.analyst_note) || '';
+  }
   const r = await fetch(`/api/findings/${id}/state`, {
     method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({state})
+    body: JSON.stringify({state, note})
   });
   if (!r.ok) { alert('Failed to update state'); return; }
   const updated = await r.json();
   const i = DATA.findings.findIndex(f => f.id === id);
   if (i >= 0) DATA.findings[i] = updated;
   if ($('#drawer').classList.contains('open') && $('#drawer').dataset.id === id) openDrawer(id);
+}
+
+function applyTriage(id) {
+  changeState(id, $('#drawer-state').value, $('#drawer-note').value.trim());
+  toast('Triage decision saved', true);
 }
 
 function openDrawer(id) {
@@ -342,6 +353,14 @@ function openDrawer(id) {
       <div class="k">Reachable</div><div>${ex.reachable===true?'yes':ex.reachable===false?'no':'unknown'}</div>
       <div class="k">Reported by</div><div>${f.sources.map(s=>`<span class="badge src">${esc(s)}</span>`).join('')}</div>
       <div class="k">Fixed in</div><div>${esc(f.fixed_in.join(', ')||'—')}</div>
+    </div>
+    <div class="section">
+      <h3>Triage</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select id="drawer-state">${DATA.states.map(s => `<option value="${s}" ${s===f.validation_state?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}</select>
+        <input id="drawer-note" type="text" maxlength="300" placeholder="Why? Optional note — kept with the decision and shown to the AI on similar findings" value="${esc(f.analyst_note||'')}" style="flex:1;min-width:220px" />
+        <button onclick="applyTriage('${f.id}')">Apply</button>
+      </div>
     </div>
     <div class="section">
       <h3>Exploitability — ${esc(ex.level)} (${ex.score.toFixed(0)}/100)</h3>

@@ -297,12 +297,18 @@ On by default; toggle in the Config tab (`feedback.enabled`).
 The same history also feeds the model directly (`feedback.prompt_history`, on
 by default): each finding sent to the exploitability engine carries
 `prior_analyst_decisions` — how many similar findings (same CWE family or
-component) this org's analysts confirmed vs dismissed. Where the score prior
-corrects the output *after* the fact, this puts the ground truth *into* the
-reasoning: the model can weigh the history where it transfers, explain in the
-rationale when it influenced the judgement, and disregard it where the instance
-differs — and it is instructed never to let history override grounded facts
-like KEV or reachability.
+component) this org's analysts confirmed vs dismissed, plus up to three of the
+analysts' own recent notes explaining why. Where the score prior corrects the
+output *after* the fact, this puts the ground truth *into* the reasoning: the
+model can weigh the history where it transfers, explain in the rationale when
+it influenced the judgement, and disregard it where the instance differs — and
+it is instructed never to let history override grounded facts like KEV or
+reachability.
+
+When triaging (drawer → **Triage**), analysts can attach that optional
+one-line note ("why") to a decision. It persists with the decision, appears in
+the audit event, survives rescans and quick state changes, and is what turns
+the history from bare counts into transferable reasoning for the model.
 
 ### Score calibration — is the scoring actually right?
 
@@ -361,8 +367,10 @@ cross-scanner provenance, fix versions, the AI exploitability rationale, and any
 attack chains it belongs to (narrative, preconditions, impact, MITRE ATT&CK).
 
 Analysts **change the validation state inline** (confirm, mark false positive,
-accept risk, …). Those decisions persist to the state store and are persisted — a
-rescan never overturns an analyst's call.
+accept risk, …) — quick changes from the queue, or from the drawer's **Triage**
+section, which also takes an optional one-line note explaining the decision
+(persisted, audited, and shown to the AI on similar findings). A rescan never
+overturns an analyst's call.
 
 A **Threats** tab shows the per-service **STRIDE threat models** (see below):
 threats linked to their findings and chains, assets, entry points, trust

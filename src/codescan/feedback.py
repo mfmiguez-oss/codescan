@@ -108,21 +108,34 @@ class TriageHistory:
     Where the feedback prior (`apply_feedback`) adjusts scores *after* the AI
     stage, this puts the same org ground truth *into* the model's reasoning: a
     finding's prompt digest gains the counts of how analysts triaged similar
-    findings (same weakness family / component). Unlike the blind prior, the
-    model can judge whether the history applies to *this* instance — and it is
-    told to treat it as context, never as a verdict (see exploitability.py).
+    findings (same weakness family / component), plus the analysts' own one-line
+    reasons where they left one. Unlike the blind prior, the model can judge
+    whether the history applies to *this* instance — and it is told to treat it
+    as context, never as a verdict (see exploitability.py).
     """
+
+    MAX_NOTES = 3     # most recent analyst notes carried per finding — signal, not bulk
 
     def __init__(self, store: StateStoreBase) -> None:
         self._model = FeedbackModel.from_store(store)
+        self._entries = store.all_entries()
 
     def context(self, finding: Finding) -> dict | None:
-        """Counts of similar manual decisions, or None when there is no history
-        (so findings without history add nothing to the prompt)."""
+        """Counts (and recent analyst notes) of similar manual decisions, or None
+        when there is no history (so findings without history add nothing)."""
         pos, neg = self._model.evidence(finding)
         if not pos and not neg:
             return None
-        return {"confirmed": len(pos), "false_positive": len(neg)}
+        ctx: dict = {"confirmed": len(pos), "false_positive": len(neg)}
+        noted = []
+        for fid in pos | neg:
+            e = self._entries.get(fid, {})
+            if e.get("note"):
+                noted.append((e.get("decided_at", ""), f"{e['state'].value}: {e['note']}"))
+        if noted:
+            noted.sort(reverse=True)                       # most recent decisions first
+            ctx["analyst_notes"] = [n for _, n in noted[: self.MAX_NOTES]]
+        return ctx
 
 
 def apply_feedback(
