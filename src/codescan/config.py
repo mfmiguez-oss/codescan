@@ -249,6 +249,20 @@ class CalibrationConfig(_StrictModel):
     min_separation: float = 0.0          # confirmed-vs-FP mean-score gap below this -> drift
 
 
+class ServerConfig(_StrictModel):
+    """Web-server resource controls — defense against unbounded consumption
+    (OWASP LLM04/10). Rate limiting throttles `/api/*` requests per client so a
+    runaway loop or a hostile caller can't drive unbounded LLM spend by
+    triggering scans; the per-scan finding ceiling bounds the cost of any single
+    run. Both are belt-and-suspenders behind a reverse proxy, not a replacement
+    for one."""
+
+    rate_limit_enabled: bool = True
+    rate_limit_rpm: int = 60         # sustained requests/min per client to /api/*
+    rate_limit_burst: int = 20       # extra requests allowed in a short spike
+    max_findings_per_scan: int = 5000  # hard cap on findings a single scan processes (0 = unlimited)
+
+
 class SyslogSinkConfig(_StrictModel):
     """Forward audit events to a syslog collector (the classic SIEM path:
     Splunk/QRadar/ArcSight/rsyslog). Each event is one JSON syslog message."""
@@ -314,6 +328,7 @@ class Config(_StrictModel):
     storage: StorageConfig = StorageConfig()
     vault: VaultConfig = VaultConfig()
     audit: AuditConfig = AuditConfig()
+    server: ServerConfig = ServerConfig()
 
     @classmethod
     def load(cls, path: str | Path) -> "Config":

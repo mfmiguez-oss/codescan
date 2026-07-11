@@ -242,3 +242,14 @@ calibration:
   min_bucket_decisions: 5      # evidence needed before a check can fire
   min_high_confirm_rate: 0.5   # 80-100 bucket confirm rate below this -> drift
   min_separation: 0.0          # confirmed-vs-FP mean-score gap below this -> drift
+
+# Web-server resource controls (defense against unbounded LLM/resource
+# consumption — OWASP LLM04/10). Rate limiting throttles /api/* per client so a
+# runaway loop or hostile caller can't drive unbounded scan/LLM cost; the
+# per-scan ceiling bounds the cost of any single run (highest-severity findings
+# are kept when it truncates). Applied at server startup.
+server:
+  rate_limit_enabled: true
+  rate_limit_rpm: 60           # sustained requests/min per client to /api/*
+  rate_limit_burst: 20         # extra requests allowed in a short spike
+  max_findings_per_scan: 5000  # hard cap per scan; 0 = unlimited

@@ -699,6 +699,15 @@ Considerations:
   (`Authorization: Bearer`, `X-API-Token`, or a cookie set from `/?token=`), with a
   constant-time compare; `/healthz` and the static shell stay open. It's defense in
   depth for accidental exposure — SSO/RBAC belongs at the reverse proxy.
+- **Resource controls against unbounded consumption** (`ratelimit.py`, OWASP
+  LLM04/10). A per-client token-bucket limiter throttles `/api/*`
+  (`server.rate_limit_rpm` / `rate_limit_burst`, keyed by SSO actor or client
+  IP) so a runaway loop or hostile caller can't drive unbounded scan/LLM cost;
+  it runs ahead of the token guard, so a flood is cheap to reject with `429`.
+  A per-scan ceiling (`server.max_findings_per_scan`) bounds the cost of any
+  single run, keeping the highest-severity findings and recording a
+  `scan.truncated` audit event when it trims. Both are set at startup; behind a
+  load balancer the proxy's own limiter is still preferred.
 - **Fail-loud config.** Config models reject unknown keys (`extra="forbid"`), so a
   misspelled security setting fails at load rather than silently reverting to a
   default.
@@ -833,8 +842,11 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   onto requests, Fable's data-retention 400 re-raised actionably, and the
   enterprise config profile routing deep tasks to Fable / mechanical to Haiku.
 - **Web API** (`tests/test_web.py`) — FastAPI TestClient over state, scan,
-  state-change (persistent-across-rescan), validation, ServiceNow, and the
-  **API-token guard** (401 without, accepted via header/cookie, healthz open).
+  state-change (persistent-across-rescan), validation, ServiceNow, the
+  **API-token guard** (401 without, accepted via header/cookie, healthz open),
+  and **rate limiting** (429 on flood with `Retry-After`, healthz unthrottled).
+- **Rate limiter** (`tests/test_ratelimit.py`) — token-bucket burst then block,
+  time-based refill, per-client isolation, idle-bucket eviction.
 
 All tests run offline with no Anthropic key. The AI stages are integration
 points validated by contract (schema) rather than live calls. **CI**
@@ -866,6 +878,8 @@ builds the image on every push/PR; `mypy` is a clean gate and the package ships
   `prompt_history` (triage history into the AI prompt).
 - `calibration` — drift alerting: `alerts_enabled`, `min_bucket_decisions`,
   `min_high_confirm_rate`, `min_separation`.
+- `server` — resource controls: `rate_limit_enabled`, `rate_limit_rpm`,
+  `rate_limit_burst`, `max_findings_per_scan`.
 - `storage` — validation-state backend: `backend` (file/sql) + `dsn` (SQLAlchemy URL).
 - `vault` — optional HashiCorp Vault secret source: `enabled`, `address`,
   `auth` (token/approle), `kv_mount`/`kv_version`, `paths`, `override_env`.

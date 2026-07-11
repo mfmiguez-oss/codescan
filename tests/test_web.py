@@ -151,6 +151,29 @@ def test_calibration_alerts_config_round_trip(tmp_path):
     assert updated["calibration"]["alerts_enabled"] is False
 
 
+def test_rate_limit_returns_429_on_flood(tmp_path, monkeypatch):
+    # Force a small burst so the flood is cheap and deterministic.
+    from codescan.ratelimit import RateLimiter
+    real_init = RateLimiter.__init__
+    monkeypatch.setattr(RateLimiter, "__init__",
+                        lambda self, rpm, burst: real_init(self, rpm=60, burst=3))
+    client = _client(tmp_path)
+
+    codes = [client.get("/api/state").status_code for _ in range(8)]
+    assert codes[:3] == [200, 200, 200]             # burst allowed
+    assert 429 in codes                              # then throttled
+    limited = client.get("/api/state")
+    assert limited.status_code == 429 and limited.headers.get("Retry-After") == "1"
+    # The liveness probe is not under /api and is never throttled.
+    assert client.get("/healthz").status_code == 200
+
+
+def test_rate_limit_config_surfaced_read_only(tmp_path):
+    server = _client(tmp_path).get("/api/config").json()["server"]
+    assert server["rate_limit_enabled"] is True
+    assert server["max_findings_per_scan"] == 5000
+
+
 def test_invalid_state_rejected(tmp_path):
     client = _client(tmp_path)
     fid = client.get("/api/state").json()["findings"][0]["id"]

@@ -113,6 +113,27 @@ def test_calibration_drift_raises_audit_event(tmp_path):
     assert drift and "high-score precision drift" in drift[0]["alert"]
 
 
+def test_max_findings_per_scan_caps_and_keeps_worst(tmp_path):
+    cfg = Config.load(CONFIG)
+    cfg.server.max_findings_per_scan = 3        # fixtures have 6 findings
+    cfg.audit.enabled = True
+    import json
+
+    result = Pipeline(cfg, offline=True, use_ai=False).run(
+        fixtures=FIXTURES, out_path=tmp_path / "sn.json", state_path=tmp_path / "state.json",
+    )
+    assert len(result.findings) == 3
+    # The cap keeps the highest-CVSS findings, never silently drops the worst.
+    full = _run(tmp_path / "full")
+    top3 = sorted((f.cvss_score or 0 for f in full.findings), reverse=True)[:3]
+    assert sorted((f.cvss_score or 0 for f in result.findings), reverse=True) == top3
+    # Truncation is audited.
+    events = [json.loads(line) for line in
+              (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()]
+    trunc = [e for e in events if e["event"] == "scan.truncated"]
+    assert trunc and trunc[0]["dropped"] == 3
+
+
 def test_persistent_state_survives_rerun(tmp_path):
     result = _run(tmp_path)
     state_file = tmp_path / "state.json"

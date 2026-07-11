@@ -30,6 +30,7 @@ from .logging_setup import configure
 from .models import SERVICENOW_STATE, Finding, ValidationState
 from .pipeline import Pipeline, PipelineResult
 from .providers import PROVIDERS
+from .ratelimit import RateLimiter
 from .servicenow import ServiceNowExporter, items_to_csv
 from .validation import CHAIN_KEY_PREFIX, CHAIN_STATES, active_chains, open_state_store
 
@@ -58,6 +59,18 @@ def _request_token(request: Request) -> str:
 # itself; when it runs behind an authenticating proxy, that proxy sets one of these
 # and the audit log attributes actions to a real user.
 _ACTOR_HEADERS = ("X-Remote-User", "X-Forwarded-User", "X-Authenticated-User", "X-Auth-Request-User")
+
+
+def _client_key(request: Request) -> str:
+    """Rate-limit identity: the SSO/proxy actor if present, else the client IP.
+    Falls back to a constant so a limiter is never silently keyless."""
+    for h in _ACTOR_HEADERS:
+        if request.headers.get(h):
+            return f"user:{request.headers[h]}"
+    fwd = request.headers.get("X-Forwarded-For", "")
+    if fwd:
+        return f"ip:{fwd.split(',')[0].strip()}"
+    return f"ip:{request.client.host if request.client else 'unknown'}"
 
 
 def _actor(request: Request) -> str:
@@ -137,6 +150,13 @@ def sanitized_config(cfg: Config) -> dict:
         "feedback": {"enabled": cfg.feedback.enabled,
                      "prompt_history": cfg.feedback.prompt_history},
         "calibration": {"alerts_enabled": cfg.calibration.alerts_enabled},
+        # Read-only in the UI: resource controls are applied at server startup.
+        "server": {
+            "rate_limit_enabled": cfg.server.rate_limit_enabled,
+            "rate_limit_rpm": cfg.server.rate_limit_rpm,
+            "rate_limit_burst": cfg.server.rate_limit_burst,
+            "max_findings_per_scan": cfg.server.max_findings_per_scan,
+        },
         "openhack": {
             "enabled": cfg.openhack.enabled,
             "findings_dir": cfg.openhack.findings_dir,
@@ -489,6 +509,20 @@ def create_app(
     configure()   # idempotent — ensure logs reach a handler when embedded
     state = AppState(config_path, fixtures, live, use_ai, offline, out_path, state_path, overrides_path)
     app = FastAPI(title="codescan", version="0.2.0")
+
+    scfg = state.cfg.server
+    limiter = (RateLimiter(scfg.rate_limit_rpm, scfg.rate_limit_burst)
+               if scfg.rate_limit_enabled else None)
+
+    @app.middleware("http")
+    async def _api_rate_limit(request: Request, call_next):
+        # Throttle /api/* per client before any work (incl. the token compare),
+        # so a flood is cheap to reject. 429 with Retry-After per HTTP semantics.
+        if limiter and request.url.path.startswith("/api/"):
+            if not limiter.allow(_client_key(request)):
+                return JSONResponse({"detail": "rate limited"}, status_code=429,
+                                    headers={"Retry-After": "1"})
+        return await call_next(request)
 
     @app.middleware("http")
     async def _api_token_guard(request: Request, call_next):

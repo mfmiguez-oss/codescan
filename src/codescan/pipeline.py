@@ -173,6 +173,20 @@ class Pipeline:
                 findings = SemanticDeduper(llm).refine(findings)  # lower-cost tier (Haiku)
         logger.info("scan %s: %d findings after dedup", run_id, len(findings))
 
+        # Bound the cost of a single scan (OWASP LLM04/10). If a run exceeds the
+        # ceiling, keep the highest-severity findings — a truncated scan must not
+        # silently drop the worst issues — and record the truncation for audit.
+        cap = self.cfg.server.max_findings_per_scan
+        n_dropped = 0
+        if cap and len(findings) > cap:
+            findings.sort(key=lambda f: (f.cvss_score or 0, f.severity.rank), reverse=True)
+            n_dropped = len(findings) - cap
+            findings = findings[:cap]
+            logger.warning("scan %s: capped at %d findings (%d dropped by "
+                           "server.max_findings_per_scan)", run_id, cap, n_dropped)
+            audit.record("scan.truncated", actor=actor, run_id=run_id,
+                         cap=cap, dropped=n_dropped)
+
         with _stage(run_id, "enrich"):
             enrichers = build_enrichers(self.cfg.enrichment, llm=llm, offline=self.offline)
             run_enrichment(findings, enrichers)
