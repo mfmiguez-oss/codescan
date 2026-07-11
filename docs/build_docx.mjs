@@ -80,7 +80,7 @@ const subtitle = new Paragraph({
 const metaTable = table(
   ["Field", "Value"],
   [
-    ["Status", "Draft / v0.1"],
+    ["Status", "Draft / v0.2"],
     ["Owner", "Application Security Engineering"],
     ["Scope", "Scanner aggregation, AI exploitability & chaining, ServiceNow VR export, analyst UI"],
     ["Related", "README.md (usage); source under src/codescan/"],

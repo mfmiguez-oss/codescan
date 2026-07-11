@@ -488,7 +488,7 @@ def create_app(
 ) -> FastAPI:
     configure()   # idempotent — ensure logs reach a handler when embedded
     state = AppState(config_path, fixtures, live, use_ai, offline, out_path, state_path, overrides_path)
-    app = FastAPI(title="codescan", version="0.1.0")
+    app = FastAPI(title="codescan", version="0.2.0")
 
     @app.middleware("http")
     async def _api_token_guard(request: Request, call_next):

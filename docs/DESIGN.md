@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft / v0.1 |
+| **Status** | Draft / v0.2 |
 | **Owner** | Application Security Engineering |
 | **Scope** | Enterprise code-scanning aggregation, AI exploitability triage, and ServiceNow VR feed |
 | **Related** | `README.md` (usage), [DATAFLOW.md](DATAFLOW.md) (formal DFDs + trust boundaries), [GOVERNANCE.md](GOVERNANCE.md) (controls → evidence), [RELEASING.md](RELEASING.md) (change/release procedure), source under `src/codescan/` |
