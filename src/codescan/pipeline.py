@@ -99,9 +99,16 @@ class Pipeline:
         repos = self._repo_connector().list_repos()
         # Map scanner project/build names back to repo full names.
         repo_by_name = {r.slug: r.full_name for r in repos}
-        snyk = SnykConnector(self.cfg.snyk).fetch(repo_by_name)
-        xray = XrayConnector(self.cfg.xray).fetch(repo_by_name)
-        findings = [*snyk, *xray]
+        # Skip an unconfigured finding source rather than erroring on it, so a
+        # scan can run on the sources that *are* wired up — e.g. a whitebox-only
+        # GitHub + OpenHack scan with no Snyk/Xray account.
+        findings: list[Finding] = []
+        for name, conn in (("snyk", SnykConnector(self.cfg.snyk)),
+                           ("xray", XrayConnector(self.cfg.xray))):
+            if conn.configured:
+                findings.extend(conn.fetch(repo_by_name))
+            else:
+                logger.info("scan: %s not configured — skipping that source", name)
         # OpenHack whitebox findings — covers repos the SCA/CVE scanners missed.
         oh = self.cfg.openhack
         if oh.auto and repos:

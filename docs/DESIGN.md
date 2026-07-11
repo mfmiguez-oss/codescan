@@ -216,6 +216,15 @@ so their findings land on the same repo and can be deduped. The pipeline passes
 a `name → repo` map into each connector; the current implementation matches by
 slug and is the documented integration point to harden for production (§11).
 
+**Optional finding sources.** Each finding source is used only when its
+credentials are present: a connector exposes `configured`, and `_ingest_live`
+skips (logs, does not error) any source that isn't set up. This lets a scan run
+on whichever sources are wired up — in particular a **whitebox-only** scan
+(`scan --whitebox`) that enumerates a GitHub repo and reviews its source with the
+built-in OpenHack engine (`openhack_engine.py`), needing only an Anthropic key, a GitHub token,
+and `git` — no Snyk/Xray account. GitHub's `api_url` defaults to `api.github.com`
+when unset (a `GitHubConfig` validator), so a github.com scan needs no extra URL.
+
 ### 5.2 Deduplication (two passes)
 
 1. **Deterministic** (`dedup.py`) — group by fingerprint, merge collisions. The

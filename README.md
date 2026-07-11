@@ -465,10 +465,23 @@ export ANTHROPIC_API_KEY=…           # only if AI stages are enabled
 codescan scan --repo acme/checkout   # or several: --repo a/b --repo c/d
 ```
 
-> codescan uses GitHub for the **repo inventory** (the scan surface) — the actual
-> vulnerability **findings come from Snyk and Xray**. A repo that Snyk/Xray
-> haven't scanned yet appears in the inventory with zero findings; codescan does
-> not run SAST/SCA on the code itself.
+> codescan uses GitHub for the **repo inventory** (the scan surface) — the SCA/CVE
+> **findings come from Snyk and Xray**. A repo those tools haven't scanned appears
+> with zero SCA findings unless you also run the whitebox engine below. A finding
+> source whose credentials aren't set is **skipped** (not an error), so you can
+> run on whichever sources are wired up.
+
+**Whitebox-only scan (no Snyk/Xray account).** To review a repo's *source* with
+the built-in OpenHack AI engine — the way to scan a repo you don't have SCA
+tooling for — add `--whitebox`. It clones the repo and reviews it with the model;
+Snyk/Xray are skipped when uncredentialed, so all you need is an Anthropic key,
+a GitHub token (optional for public repos, avoids rate limits), and `git`:
+
+```bash
+export ANTHROPIC_API_KEY=…            # the whitebox engine is AI-driven
+export GITHUB_TOKEN=ghp_...           # optional for public repos
+codescan scan --repo mfmiguez-oss/codescan --whitebox --out out.json
+```
 
 You can also set the target repos without the CLI: in the **Config** tab, pick
 `github` as the repo source and enter `owner/name` repos in **GitHub repos**,

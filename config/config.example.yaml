@@ -73,6 +73,10 @@ github:
   orgs: []               # whole orgs (used when repos is empty)
   verify_tls: true       # empty repos+orgs = all repos the token can see
 
+# Snyk / Xray are the SCA/CVE finding sources. Each is used only when its
+# credentials are set — an unconfigured source is skipped (not an error), so a
+# scan can run on whichever sources are wired up (e.g. a whitebox-only GitHub
+# scan with `codescan scan --repo owner/name --whitebox` and no Snyk/Xray).
 snyk:
   api_url: ${SNYK_API_URL}
   token: ${SNYK_TOKEN}

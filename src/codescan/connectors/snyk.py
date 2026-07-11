@@ -21,6 +21,13 @@ class SnykConnector:
         self.cfg = cfg
         self.http = HttpClient(cfg.api_url, cfg.token, auth_scheme="token", verify_tls=cfg.verify_tls)
 
+    @property
+    def configured(self) -> bool:
+        """True only when the live pull has everything it needs. Lets a live scan
+        skip Snyk (rather than error) when no Snyk account is wired up — e.g. a
+        whitebox-only GitHub scan."""
+        return bool(self.cfg.api_url and self.cfg.token and self.cfg.org_id)
+
     # --- live API ---------------------------------------------------------
     def fetch(self, repo_by_target: dict[str, str]) -> list[Finding]:
         """Fetch aggregated issues for every project in the org.

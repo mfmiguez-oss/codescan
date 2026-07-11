@@ -37,6 +37,41 @@ def test_provider_selects_connector():
     assert isinstance(Pipeline(cfg)._repo_connector(), GitHubConnector)
 
 
+def test_snyk_xray_configured_flags():
+    from codescan.config import SnykConfig, XrayConfig
+    from codescan.connectors import SnykConnector, XrayConnector
+
+    # Blank creds (unset ${ENV} -> "") -> not configured, so a live scan skips them.
+    assert not SnykConnector(SnykConfig()).configured
+    assert not XrayConnector(XrayConfig()).configured
+    # Fully wired -> configured.
+    assert SnykConnector(SnykConfig(api_url="https://snyk", token="t", org_id="o")).configured
+    assert XrayConnector(XrayConfig(base_url="https://xray", token="t")).configured
+    # Partial creds are still "not configured" (won't half-run and error).
+    assert not SnykConnector(SnykConfig(api_url="https://snyk", token="t")).configured  # no org_id
+
+
+def test_live_scan_skips_unconfigured_sources(monkeypatch):
+    from codescan.connectors import github as gh_mod
+    from codescan.connectors import snyk as snyk_mod
+    from codescan.connectors import xray as xray_mod
+    from codescan.models import Repo
+
+    cfg = Config()
+    cfg.source.provider = "github"        # no Snyk/Xray creds -> both unconfigured
+    monkeypatch.setattr(gh_mod.GitHubConnector, "list_repos",
+                        lambda self: [Repo(project_key="o", slug="r", name="o/r", clone_url="")])
+
+    def boom(self, mapping):
+        raise AssertionError("an unconfigured finding source must not be fetched")
+
+    monkeypatch.setattr(snyk_mod.SnykConnector, "fetch", boom)
+    monkeypatch.setattr(xray_mod.XrayConnector, "fetch", boom)
+
+    repos, findings = Pipeline(cfg, offline=True, use_ai=False)._ingest_live()
+    assert len(repos) == 1 and findings == []      # skipped cleanly, no error
+
+
 class _FakeResp:
     def __init__(self, data):
         self._data = data

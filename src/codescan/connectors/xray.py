@@ -20,6 +20,12 @@ class XrayConnector:
         self.cfg = cfg
         self.http = HttpClient(cfg.base_url, cfg.token, verify_tls=cfg.verify_tls)
 
+    @property
+    def configured(self) -> bool:
+        """True only when the live pull has everything it needs — lets a live
+        scan skip Xray when no Xray account is wired up."""
+        return bool(self.cfg.base_url and self.cfg.token)
+
     def fetch(self, repo_by_build: dict[str, str]) -> list[Finding]:
         findings: list[Finding] = []
         page = 1

@@ -44,9 +44,17 @@ def scan(
         help="Target specific GitHub repo(s) 'owner/name'. Implies GitHub source "
              "and a live scan. Repeatable.",
     ),
+    whitebox: bool = typer.Option(
+        False, "--whitebox",
+        help="Review the target repo's source with the built-in OpenHack AI "
+             "engine (clones + scans it). Needs AI enabled and git; Snyk/Xray "
+             "are skipped when their credentials aren't set. Use with --repo.",
+    ),
 ) -> None:
     """Run the full pipeline and write a ServiceNow VR import file."""
     configure()
+    if whitebox and no_ai:
+        raise typer.BadParameter("--whitebox needs the AI engine; drop --no-ai.")
     cfg = Config.load(config)
     if sn_format:
         cfg.servicenow.format = sn_format
@@ -54,6 +62,13 @@ def scan(
         # Scope to specific GitHub repos -> GitHub source, live ingest.
         cfg.source.provider = "github"
         cfg.github.repos = list(repo)
+        fixtures = None
+    if whitebox:
+        # Turn on the built-in whitebox engine for a live scan of the source.
+        cfg.source.provider = "github"
+        cfg.openhack.auto = True
+        cfg.openhack.clone = True
+        cfg.openhack.command = []          # force the built-in engine
         fixtures = None
     pipeline = Pipeline(cfg, offline=offline, use_ai=not no_ai)
     result = pipeline.run(fixtures=fixtures, out_path=out, state_path=state)
