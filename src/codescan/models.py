@@ -52,6 +52,16 @@ def size_difficulty(count: int, *, low_max: int = 2, high_min: int = 6) -> str:
     return "normal"
 
 
+def chain_fingerprint(finding_ids: list[str]) -> str:
+    """Stable identity for an attack chain: the set of findings it links.
+
+    Model-assigned chain ids (CH-1, …) are not stable across runs; the finding
+    set is. Keying analyst decisions on it lets a dismissal survive rescans and
+    re-apply when the model reports the same path again.
+    """
+    return hashlib.sha256("|".join(sorted(finding_ids)).encode()).hexdigest()[:32]
+
+
 def finding_component_label(finding: "Finding") -> str:
     """Return a stable component label like name@version."""
     return f"{finding.component.name}@{finding.component.version or ''}"

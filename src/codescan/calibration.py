@@ -28,7 +28,7 @@ snapshots existed still count toward totals but can't be bucketed by score.
 from __future__ import annotations
 
 from .models import ValidationState
-from .validation import StateStoreBase
+from .validation import CHAIN_KEY_PREFIX, StateStoreBase
 
 # Risk-score buckets, aligned with the severity bands analysts already think in.
 BUCKETS = (
@@ -64,8 +64,10 @@ def calibration_report(store: StateStoreBase, *, top_n: int = 5) -> dict:
     scored = {"confirmed": 0, "false_positive": 0}
     fp_by_key: dict[str, dict[str, int]] = {}
 
-    for entry in store.all_entries().values():
-        if not entry.get("manual"):
+    for fid, entry in store.all_entries().items():
+        # Chain decisions live in the same store but grade the chaining stage,
+        # not the per-finding scoring — they'd pollute the buckets.
+        if not entry.get("manual") or fid.startswith(CHAIN_KEY_PREFIX):
             continue
         state = entry["state"]
         if state == _POSITIVE:

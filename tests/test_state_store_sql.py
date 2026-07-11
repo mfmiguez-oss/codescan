@@ -107,6 +107,14 @@ def test_feedback_reads_sql_store(tmp_path):
     assert new.risk_score == 50.0                        # 15 * -6/(6+3) via the SQL prior
 
 
+def test_chain_decision_round_trip_sql(tmp_path):
+    dsn = _dsn(tmp_path)
+    SqlStateStore(dsn).record_chain("abc123", ValidationState.confirmed, note="real path")
+    fresh = SqlStateStore(dsn)                            # a fresh connection sees it
+    assert fresh.chain_state("abc123") == ValidationState.confirmed
+    assert fresh.entry("chain:abc123")["note"] == "real path"
+
+
 def test_pipeline_persists_to_sql(tmp_path):
     cfg = Config.load(ROOT / "config" / "config.example.yaml")
     cfg.storage.backend = "sql"

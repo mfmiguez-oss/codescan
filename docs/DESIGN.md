@@ -287,7 +287,10 @@ Design points:
   other, and per-service scoping keeps each request tractable at enterprise
   scale.
 - **Chains are cross-finding objects** and are returned separately (attached to
-  findings by ID), not stored on any single finding.
+  findings by ID), not stored on any single finding. Each carries a stable
+  **finding-set fingerprint** (`chain_fingerprint`, models.py) so analyst
+  decisions on a chain survive rescans even though model-assigned chain ids
+  don't (§5.7).
 
 ### 5.5 Model routing + multi-provider harness (`llm.py`, `providers/`)
 
@@ -414,6 +417,17 @@ re-opens it — analyst effort is never silently discarded. Machine proposals re
 re-derivable. Entries persisted by releases before the snapshot existed still load
 (file store: absent keys; SQL store: `ADD COLUMN` migrations applied on open).
 
+**Attack chains have a lifecycle too** — the most speculative output in the
+pipeline otherwise has no feedback signal. Analysts confirm or dismiss a chain
+(`new` / `confirmed` / `false_positive`; lifecycle states don't apply to paths).
+Decisions persist in the same store under a `chain:<fingerprint>` key — the
+fingerprint hashes the chain's *finding set*, which is stable across runs where
+model-assigned chain ids are not — and `annotate_chain_states` re-applies them
+on every scan. A **dismissed chain stays in the result** (visible, reversible in
+the UI) but `active_chains` excludes it from scoring, threat modeling, and the
+ServiceNow export. Finding-oriented consumers (feedback prior, calibration,
+analyst notes) skip `chain:` keys.
+
 The store is **pluggable** behind `StateStoreBase` (select via `storage.backend`,
 `open_state_store`): the file-backed `StateStore` (JSON, atomic writes — right for a
 single instance) or the DB-backed `SqlStateStore` (SQLAlchemy → Postgres/SQLite) for
@@ -501,9 +515,12 @@ format is settable in config, the config UI, or with `--sn-format` on the CLI.
 
 FastAPI backend holding the latest `PipelineResult` in memory; a single
 dependency-free HTML page for the frontend. Endpoints: `GET /api/state`,
-`POST /api/scan`, `POST /api/findings/{id}/state`, `GET /api/servicenow`,
+`POST /api/scan`, `POST /api/findings/{id}/state`,
+`POST /api/chains/{fingerprint}/state`, `GET /api/servicenow`,
 `GET /api/calibration`, `GET`/`POST /api/config`, and `GET /api/export`
-(JSON/CSV download). The views:
+(JSON/CSV download). Chain cards (drawer and chains panel) carry a
+confirm/dismiss control; a dismissed chain renders dimmed with a badge and
+stops counting on the next scan. The views:
 
 - **Overview** — the landing page: run status (source, mode, last run), key
   metrics, a severity breakdown, quick actions (run, download JSON/CSV, jump to
@@ -770,8 +787,9 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   API push path** (posts each record; a failing push doesn't abort the export).
 - **State store** (`tests/test_validation.py`) — atomic save round-trip, no temp
   leftover, crash-during-replace preserves the existing file, machine-belief
-  snapshot capture, analyst-note round-trip, and legacy (pre-snapshot) entries
-  loading cleanly.
+  snapshot capture, analyst-note round-trip, legacy (pre-snapshot) entries
+  loading cleanly, and chain decisions (round-trip, annotation, dismissed-chain
+  exclusion, lifecycle states rejected).
 - **Vault** (`tests/test_vault.py`) — KV v1/v2 injection, override semantics, auth
   errors, and the `Config.load` wiring (fake client).
 - **Audit log** (`tests/test_audit.py`) — record/tail JSONL round-trip, disabled
@@ -793,8 +811,9 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   concurrency guard, the pre-snapshot schema upgrading in place, feedback over
   the SQL store, and a pipeline run persisting to SQLite.
 - **Calibration** (`tests/test_calibration.py`) — bucket/rate math, accuracy
-  states only, noisy-key surfacing, legacy decisions counted but unbucketed, and
-  the empty-store zeroed report; endpoint coverage in `test_web.py`.
+  states only, noisy-key surfacing, legacy decisions counted but unbucketed,
+  chain decisions excluded, and the empty-store zeroed report; endpoint coverage
+  in `test_web.py`.
 - **Enterprise / Fable 5** (`tests/test_enterprise.py`) — `inference_geo` threaded
   onto requests, Fable's data-retention 400 re-raised actionably, and the
   enterprise config profile routing deep tasks to Fable / mechanical to Haiku.

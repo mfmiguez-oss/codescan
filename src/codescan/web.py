@@ -31,7 +31,7 @@ from .models import SERVICENOW_STATE, Finding, ValidationState
 from .pipeline import Pipeline, PipelineResult
 from .providers import PROVIDERS
 from .servicenow import ServiceNowExporter, items_to_csv
-from .validation import open_state_store
+from .validation import CHAIN_KEY_PREFIX, CHAIN_STATES, active_chains, open_state_store
 
 STATIC = Path(__file__).parent / "static"
 
@@ -420,11 +420,34 @@ class AppState:
         """Persisted analyst notes by finding id, for display alongside findings."""
         store = open_state_store(self.cfg.storage, self.state_path)
         return {fid: e["note"] for fid, e in store.all_entries().items()
-                if e.get("manual") and e.get("note")}
+                if e.get("manual") and e.get("note")
+                and not fid.startswith(CHAIN_KEY_PREFIX)}
+
+    def set_chain_state(self, fingerprint: str, state: str, *, note: str = "",
+                        actor: str = "system") -> dict:
+        chain = next((c for c in self.result.chains
+                      if c.get("fingerprint") == fingerprint), None)
+        if chain is None:
+            raise KeyError(fingerprint)
+        new_state = ValidationState(state)          # raises ValueError if invalid
+        if new_state not in CHAIN_STATES:
+            raise ValueError(state)
+        previous = chain.get("validation_state", "new")
+        store = open_state_store(self.cfg.storage, self.state_path)
+        store.record_chain(fingerprint, new_state, note=note)
+        store.save()
+        chain["validation_state"] = new_state.value
+        extra = {"note": note.strip()} if note.strip() else {}
+        self.audit.record("chain.validation.changed", actor=actor,
+                          chain_fingerprint=fingerprint,
+                          chain_id=chain.get("chain_id", ""),
+                          **{"from": previous, "to": new_state.value}, **extra)
+        return chain
 
     def servicenow_items(self) -> list[dict]:
+        # Mirrors the pipeline: analyst-dismissed chains don't reach the export.
         return ServiceNowExporter(self.cfg.servicenow).build(
-            self.result.findings, self.result.chains
+            self.result.findings, active_chains(self.result.chains)
         )
 
 
@@ -511,6 +534,16 @@ def create_app(
         except ValueError:
             raise HTTPException(status_code=400, detail="invalid validation state")
         return finding_to_dict(f, change.note.strip())
+
+    @app.post("/api/chains/{fingerprint}/state")
+    def set_chain_state(fingerprint: str, change: StateChange, request: Request) -> dict:
+        try:
+            return state.set_chain_state(fingerprint, change.state,
+                                         note=change.note, actor=_actor(request))
+        except KeyError:
+            raise HTTPException(status_code=404, detail="chain not found")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid chain state")
 
     @app.get("/api/audit")
     def audit(limit: int = 200) -> dict:

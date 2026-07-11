@@ -316,6 +316,17 @@ one-line note ("why") to a decision. It persists with the decision, appears in
 the audit event, survives rescans and quick state changes, and is what turns
 the history from bare counts into transferable reasoning for the model.
 
+### Chain triage — judging the paths, not just the findings
+
+Attack chains get the same treatment as findings: every chain card carries a
+**confirm / dismiss** control. Decisions key on the chain's *finding-set
+fingerprint* (model-assigned chain ids aren't stable across runs), so when a
+rescan rediscovers the same path, the analyst's judgement re-applies. A
+**dismissed** chain stays visible (dimmed, reversible) but stops counting: it
+no longer boosts finding scores, feeds threat modeling, or reaches the
+ServiceNow export. This closes the loop on the pipeline's most speculative
+output — chaining — which previously had no feedback signal at all.
+
 ### Score calibration — is the scoring actually right?
 
 Every decision the store persists also freezes a **snapshot of what the machine

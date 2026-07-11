@@ -80,6 +80,17 @@ def test_noisy_keys_surface_fp_dominated_families(tmp_path):
     assert all(n["fp_rate"] == 1.0 and n["false_positive"] == 3 for n in noisy)
 
 
+def test_chain_decisions_dont_pollute_the_report(tmp_path):
+    store = StateStore(tmp_path / "s.json")
+    store.record_chain("fp1", ValidationState.false_positive, note="steps don't connect")
+    store.record_chain("fp2", ValidationState.confirmed)
+    _seed(store, "f", ValidationState.confirmed, score=90.0)
+
+    report = calibration_report(store)
+    assert report["decisions"] == 1                   # only the finding decision counts
+    assert report["unscored"] == 0
+
+
 def test_legacy_decisions_without_snapshot_counted_but_unbucketed(tmp_path):
     path = tmp_path / "s.json"
     # A decision persisted by a release before snapshots existed.

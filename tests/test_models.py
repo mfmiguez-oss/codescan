@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 from codescan.models import (
-    Finding, Severity, Source, group_difficulty, group_findings_by_repo, size_difficulty,
+    Finding, Severity, Source, chain_fingerprint, group_difficulty,
+    group_findings_by_repo, size_difficulty,
 )
+
+
+def test_chain_fingerprint_is_order_independent():
+    assert chain_fingerprint(["b", "a", "c"]) == chain_fingerprint(["c", "a", "b"])
+    assert chain_fingerprint(["a", "b"]) != chain_fingerprint(["a", "c"])
+    assert len(chain_fingerprint(["a"])) == 32
 
 
 def _finding(repo: str, fid: str, *, severity: Severity = Severity.medium, kev: bool = False) -> Finding:

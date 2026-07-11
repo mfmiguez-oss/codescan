@@ -381,14 +381,41 @@ function openDrawer(id) {
 }
 
 function chainCard(c) {
-  return `<div class="chaincard">
+  const dismissed = c.validation_state === 'false_positive';
+  const triage = c.fingerprint ? `
+    <div style="margin-top:8px" onclick="event.stopPropagation()">
+      <select onchange="changeChainState('${esc(c.fingerprint)}', this.value)" title="Analyst judgement on this chain — persists across rescans; a dismissed chain stops influencing scores and the export">
+        ${['new','confirmed','false_positive'].map(s => `<option value="${s}" ${s===(c.validation_state||'new')?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}
+      </select>
+      ${dismissed ? '<span class="badge" style="margin-left:6px">dismissed — not counted in scores or export</span>' : ''}
+    </div>` : '';
+  return `<div class="chaincard" style="${dismissed ? 'opacity:.55' : ''}">
     <span class="cscore" style="color:${riskColor(c.chain_score)}">${c.chain_score}</span>
     <b>${esc(c.chain_id)}</b> <span class="muted">· ${esc(c.likelihood)} likelihood</span>
     <div style="margin:6px 0">${esc(c.narrative)}</div>
     <div class="muted"><b>Preconditions:</b> ${esc(c.preconditions)}</div>
     <div class="muted"><b>Impact:</b> ${esc(c.impact)}</div>
     ${(c.mitre_attack||[]).length?`<div style="margin-top:6px">${c.mitre_attack.map(m=>`<span class="badge">${esc(m)}</span>`).join('')}</div>`:''}
+    ${triage}
   </div>`;
+}
+
+async function changeChainState(fingerprint, state) {
+  const r = await fetch(`/api/chains/${fingerprint}/state`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({state, note: ''})
+  });
+  if (!r.ok) { toast('Failed to update chain', false); return; }
+  const updated = await r.json();
+  const i = DATA.chains.findIndex(c => c.fingerprint === fingerprint);
+  if (i >= 0) DATA.chains[i] = updated;
+  CHAINS_BY_ID[updated.chain_id] = updated;
+  // Refresh whichever surface is showing the card.
+  if ($('#drawer').classList.contains('open')) {
+    const fid = $('#drawer').dataset.id;
+    fid ? openDrawer(fid) : openChains();
+  }
+  toast(state === 'false_positive' ? 'Chain dismissed — scores update on the next scan' : 'Chain decision saved', true);
 }
 
 async function renderAudit() {

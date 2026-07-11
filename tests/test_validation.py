@@ -7,7 +7,7 @@ import json
 import pytest
 
 from codescan.models import Component, Finding, Location, Source, ValidationState
-from codescan.validation import StateStore
+from codescan.validation import StateStore, active_chains, annotate_chain_states
 
 
 def _finding(fid: str = "f1") -> Finding:
@@ -92,6 +92,33 @@ def test_save_is_atomic_no_temp_leftover(tmp_path):
     files = list(tmp_path.iterdir())
     assert files == [path]
     json.loads(path.read_text(encoding="utf-8"))   # valid JSON
+
+
+def test_chain_decision_round_trip_and_annotation(tmp_path):
+    path = tmp_path / "state.json"
+    store = StateStore(path)
+    store.record_chain("fp1", ValidationState.false_positive, note="steps don't connect")
+    store.save()
+
+    reloaded = StateStore(path)
+    assert reloaded.chain_state("fp1") == ValidationState.false_positive
+    assert reloaded.chain_state("unknown") is None
+
+    chains = [
+        {"chain_id": "CH-1", "fingerprint": "fp1", "chain_score": 70},
+        {"chain_id": "CH-2", "fingerprint": "fp2", "chain_score": 50},
+    ]
+    annotate_chain_states(chains, reloaded)
+    assert chains[0]["validation_state"] == "false_positive"
+    assert chains[1]["validation_state"] == "new"
+    # The dismissed chain stays visible but stops counting.
+    assert [c["chain_id"] for c in active_chains(chains)] == ["CH-2"]
+
+
+def test_chain_rejects_lifecycle_states(tmp_path):
+    store = StateStore(tmp_path / "s.json")
+    with pytest.raises(ValueError, match="invalid chain state"):
+        store.record_chain("fp1", ValidationState.risk_accepted)
 
 
 def test_crash_during_replace_preserves_existing(tmp_path, monkeypatch):

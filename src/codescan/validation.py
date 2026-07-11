@@ -58,6 +58,16 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+# Analyst decisions on attack chains share the finding table/file, keyed by a
+# "chain:" prefix on the chain's finding-set fingerprint. Consumers that reason
+# about *findings* (feedback prior, calibration) skip these keys.
+CHAIN_KEY_PREFIX = "chain:"
+
+# The only states that make sense for a chain: a real path, not a real path, or
+# undecided. (Lifecycle states describe finding remediation, which chains lack.)
+CHAIN_STATES = {ValidationState.new, ValidationState.confirmed, ValidationState.false_positive}
+
+
 class StateStoreBase(ABC):
     """The persistence contract for validation decisions. The file-backed
     `StateStore` and the DB-backed `SqlStateStore` are interchangeable behind it
@@ -73,6 +83,25 @@ class StateStoreBase(ABC):
     def record(self, finding: Finding, *, manual: bool = False, note: str = "") -> None: ...
     @abstractmethod
     def save(self) -> None: ...
+
+    # --- attack-chain decisions (shared implementation over the same storage) ---
+
+    def record_chain(self, fingerprint: str, state: ValidationState, *, note: str = "") -> None:
+        """Persist an analyst's judgement on an attack chain (always manual)."""
+        if state not in CHAIN_STATES:
+            raise ValueError(f"invalid chain state: {state.value}")
+        self._put(CHAIN_KEY_PREFIX + fingerprint, {
+            "state": state, "manual": True, "cwes": [], "component": "",
+            "snapshot": None, "decided_at": _now_iso(), "note": note.strip(),
+        })
+
+    def chain_state(self, fingerprint: str) -> ValidationState | None:
+        e = self.entry(CHAIN_KEY_PREFIX + fingerprint)
+        return e["state"] if e else None
+
+    @abstractmethod
+    def _put(self, key: str, entry: dict) -> None:
+        """Write one raw entry (chain decisions); implementation-specific."""
 
 
 class StateStore(StateStoreBase):
@@ -129,6 +158,9 @@ class StateStore(StateStoreBase):
             "snapshot": _snapshot(finding), "decided_at": _now_iso(),
             "note": note.strip(),
         }
+
+    def _put(self, key: str, entry: dict) -> None:
+        self._entries[key] = entry
 
     def save(self) -> None:
         if not self.path:
@@ -257,6 +289,10 @@ class SqlStateStore(StateStoreBase):
         self._write(finding.id, entry)
         self._entries[finding.id] = entry
 
+    def _put(self, key: str, entry: dict) -> None:
+        self._write(key, entry)
+        self._entries[key] = entry
+
     def save(self) -> None:
         return  # writes are immediate
 
@@ -315,6 +351,24 @@ def open_state_store(cfg: StorageConfig, path: str | Path | None) -> StateStoreB
             raise RuntimeError("storage.backend='sql' requires storage.dsn (a SQLAlchemy URL)")
         return SqlStateStore(cfg.dsn)
     return StateStore(path)
+
+
+def annotate_chain_states(chains: list[dict], store: StateStoreBase) -> None:
+    """Stamp each chain with the analyst's persisted decision (default: new)."""
+    for chain in chains:
+        state = store.chain_state(chain.get("fingerprint", ""))
+        chain["validation_state"] = (state or ValidationState.new).value
+
+
+def active_chains(chains: list[dict]) -> list[dict]:
+    """Chains that still count: everything an analyst hasn't dismissed.
+
+    Dismissed chains stay in the result (the UI shows them, and the decision
+    can be reversed) but are excluded from scoring, threat modeling, and the
+    ServiceNow export.
+    """
+    return [c for c in chains
+            if c.get("validation_state") != ValidationState.false_positive.value]
 
 
 def assign_states(findings: list[Finding], store: StateStoreBase) -> None:

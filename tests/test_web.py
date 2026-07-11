@@ -149,6 +149,38 @@ def test_invalid_state_rejected(tmp_path):
     assert client.post("/api/findings/invalid-id/state", json={"state": "confirmed"}).status_code == 404
 
 
+def test_chain_state_persists_and_suppresses(tmp_path):
+    import pytest
+
+    from codescan.models import ValidationState
+    from codescan.validation import StateStore
+    from codescan.web import AppState
+
+    st = AppState(str(ROOT / "config" / "config.example.yaml"), str(ROOT / "fixtures"),
+                  False, False, True, str(tmp_path / "sn.json"),
+                  str(tmp_path / "state.json"), str(tmp_path / "ov.json"))
+    st.result.chains = [{"chain_id": "CH-1", "fingerprint": "abc", "chain_score": 70,
+                         "finding_ids": [], "validation_state": "new"}]
+
+    updated = st.set_chain_state("abc", "false_positive", note="steps don't connect")
+    assert updated["validation_state"] == "false_positive"
+    # Persisted under the chain key, so a rescan re-applies it…
+    assert StateStore(tmp_path / "state.json").chain_state("abc") == ValidationState.false_positive
+    # …and the dismissed chain no longer reaches the ServiceNow export context.
+    for item in st.servicenow_items():
+        assert "CH-1" not in item.get("work_notes", "")
+
+    with pytest.raises(ValueError):
+        st.set_chain_state("abc", "risk_accepted")      # lifecycle states are for findings
+    with pytest.raises(KeyError):
+        st.set_chain_state("missing", "confirmed")
+
+
+def test_chain_endpoint_unknown_fingerprint_404(tmp_path):
+    r = _client(tmp_path).post("/api/chains/deadbeef/state", json={"state": "confirmed"})
+    assert r.status_code == 404
+
+
 def test_servicenow_endpoint(tmp_path):
     r = _client(tmp_path).get("/api/servicenow")
     assert r.status_code == 200

@@ -37,7 +37,7 @@ from .openhack_runner import OpenHackRunner
 from .scoring import Scorer
 from .servicenow import ServiceNowExporter
 from .threatmodel import ThreatModelEngine, apply_threat_influence
-from .validation import assign_states, open_state_store
+from .validation import active_chains, annotate_chain_states, assign_states, open_state_store
 
 logger = logging.getLogger(__name__)
 
@@ -188,21 +188,29 @@ class Pipeline:
                        else None)
             with _stage(run_id, "exploitability"):
                 chains = ExploitabilityEngine(llm, history=history).assess(findings)  # deep tier
-            logger.info("scan %s: %d attack chains", run_id, len(chains))
+            # Re-apply persisted analyst chain decisions (keyed by finding-set
+            # fingerprint): a dismissed chain stays visible but stops counting.
+            annotate_chain_states(chains, store)
+            logger.info("scan %s: %d attack chains (%d active)",
+                        run_id, len(chains), len(active_chains(chains)))
+
+        # Dismissed chains stay in the result for the UI but stop influencing
+        # downstream stages: threat models, scoring, and the export.
+        counted = active_chains(chains)
 
         # Threat modeling runs before scoring so it can feed back in: it enriches
         # each cited finding's exploitability, which the scorer then reflects.
         threat_models: list[ThreatModel] = []
         if llm and self.cfg.threat_model.enabled:
             with _stage(run_id, "threat_model"):
-                threat_models = ThreatModelEngine(llm).build(findings, chains)  # deep tier
+                threat_models = ThreatModelEngine(llm).build(findings, counted)  # deep tier
                 apply_threat_influence(findings, threat_models)
                 Path(out_path).with_name("threat_models.json").write_text(
                     json.dumps([tm.model_dump() for tm in threat_models], indent=2),
                     encoding="utf-8",
                 )
 
-        Scorer(self.cfg.scoring).score(findings, chains)
+        Scorer(self.cfg.scoring).score(findings, counted)
 
         # Calibrate scores from the org's accumulated confirm/false-positive history
         # (built from the store as loaded, i.e. prior decisions) before this run's
@@ -212,7 +220,7 @@ class Pipeline:
         store.save()
 
         exporter = ServiceNowExporter(self.cfg.servicenow)
-        items = exporter.export(findings, chains, out_path)
+        items = exporter.export(findings, counted, out_path)
 
         kev = sum(1 for f in findings if f.exploitability.in_kev)
         duration = round(time.perf_counter() - t0, 2)
