@@ -454,7 +454,9 @@ Flags: `--no-ai` (deterministic only), `--offline` (skip KEV/EPSS network calls)
 `--out` (ServiceNow import path), `--state` (validation-state store path),
 `--sn-format json|csv` (write a CSV for ServiceNow CSV Import Sets instead of
 JSON — also settable in config/UI), `--repo owner/name` (scan specific GitHub
-repo(s); implies GitHub source + a live scan; repeatable).
+repo(s); implies GitHub source + a live scan; repeatable), `--whitebox` (review
+the target repo's source with the built-in OpenHack AI engine; needs AI + git,
+skips uncredentialed Snyk/Xray — see below).
 
 Scan a specific GitHub repo:
 

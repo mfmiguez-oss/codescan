@@ -514,16 +514,12 @@ def create_app(
     limiter = (RateLimiter(scfg.rate_limit_rpm, scfg.rate_limit_burst)
                if scfg.rate_limit_enabled else None)
 
-    @app.middleware("http")
-    async def _api_rate_limit(request: Request, call_next):
-        # Throttle /api/* per client before any work (incl. the token compare),
-        # so a flood is cheap to reject. 429 with Retry-After per HTTP semantics.
-        if limiter and request.url.path.startswith("/api/"):
-            if not limiter.allow(_client_key(request)):
-                return JSONResponse({"detail": "rate limited"}, status_code=429,
-                                    headers={"Retry-After": "1"})
-        return await call_next(request)
-
+    # NOTE on order: Starlette runs the LAST-registered middleware OUTERMOST, so
+    # the rate limiter is defined last to sit in front of the token guard. That
+    # ordering is a security property, not cosmetic: the limiter must throttle
+    # *before* auth so that failed-auth requests still consume the limit —
+    # otherwise API-token brute-force attempts (which the guard 401s) would be
+    # completely unthrottled.
     @app.middleware("http")
     async def _api_token_guard(request: Request, call_next):
         token = _configured_token()
@@ -531,6 +527,17 @@ def create_app(
             provided = _request_token(request)
             if not provided or not hmac.compare_digest(provided, token):
                 return JSONResponse({"detail": "unauthorized"}, status_code=401)
+        return await call_next(request)
+
+    @app.middleware("http")
+    async def _api_rate_limit(request: Request, call_next):
+        # Outermost: throttle /api/* per client before any other work (incl. the
+        # token compare), so a flood — including bad-token brute-force — is cheap
+        # to reject. 429 with Retry-After per HTTP semantics.
+        if limiter and request.url.path.startswith("/api/"):
+            if not limiter.allow(_client_key(request)):
+                return JSONResponse({"detail": "rate limited"}, status_code=429,
+                                    headers={"Retry-After": "1"})
         return await call_next(request)
 
     @app.get("/", response_class=HTMLResponse)

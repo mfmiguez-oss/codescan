@@ -853,9 +853,12 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
 - **Web API** (`tests/test_web.py`) — FastAPI TestClient over state, scan,
   state-change (persistent-across-rescan), validation, ServiceNow, the
   **API-token guard** (401 without, accepted via header/cookie, healthz open),
-  and **rate limiting** (429 on flood with `Retry-After`, healthz unthrottled).
+  and **rate limiting** (429 on flood with `Retry-After`, healthz unthrottled,
+  and the limiter wrapping auth so bad-token brute-force is throttled).
 - **Rate limiter** (`tests/test_ratelimit.py`) — token-bucket burst then block,
   time-based refill, per-client isolation, idle-bucket eviction.
+- **CLI wiring** (`tests/test_cli.py`) — `--whitebox` enables the built-in
+  OpenHack engine for the target repo and is rejected with `--no-ai`.
 - **Adversarial / robustness** (`tests/test_security.py`) — the ATLAS-aligned
   threat model's guards: injection text carried as data only, a hostile model
   response can't invent findings or inflate scores (id allow-listing, score

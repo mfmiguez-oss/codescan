@@ -111,15 +111,22 @@ GOVERNANCE.md residuals.
 LLM work; a loop or hostile caller could drive unbounded cost.
 
 **Controls.** Per-client token-bucket rate limiting on `/api/*` (ratelimit.py),
-running ahead of the auth check so floods are cheap to reject with `429`; a
-per-scan finding ceiling (`server.max_findings_per_scan`) bounds any single
-run and audits truncation; `ai.max_concurrency` bounds in-flight model calls.
+registered as the **outermost** middleware so it runs *before* the token guard —
+floods are rejected with `429` before any work, and (because it wraps auth)
+bad-token brute-force attempts are throttled rather than yielding unlimited
+`401`s. A per-scan finding ceiling (`server.max_findings_per_scan`) bounds any
+single run and audits truncation; `ai.max_concurrency` bounds in-flight model
+calls. Requests are keyed by SSO actor when present, else client IP.
 
-**Residual.** In-process limiter is per-replica; behind a load balancer the
-proxy's own limiter is preferred (documented).
+**Residual.** The in-process limiter is per-replica; behind a load balancer the
+proxy's own limiter is preferred (documented). IP keying falls back to the
+`X-Forwarded-For` client hop, which is spoofable when codescan is *directly*
+exposed (no trusted proxy) — another reason anti-DoS should terminate at the
+proxy; the actor key is unspoofable behind an authenticating proxy.
 
 **Guarded by.** `tests/test_ratelimit.py`,
 `tests/test_web.py::test_rate_limit_returns_429_on_flood`,
+`tests/test_web.py::test_rate_limit_wraps_auth_so_bad_token_floods_are_throttled`,
 `tests/test_pipeline.py::test_max_findings_per_scan_caps_and_keeps_worst`.
 
 ### T6 — Excessive agency

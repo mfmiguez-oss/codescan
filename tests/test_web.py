@@ -174,6 +174,22 @@ def test_rate_limit_config_surfaced_read_only(tmp_path):
     assert server["max_findings_per_scan"] == 5000
 
 
+def test_rate_limit_wraps_auth_so_bad_token_floods_are_throttled(tmp_path, monkeypatch):
+    # The limiter must sit OUTSIDE the token guard: a bad-token brute-force flood
+    # has to hit 429, not an unlimited stream of 401s.
+    monkeypatch.setenv("CODESCAN_API_TOKEN", "s3cr3t")
+    from codescan.ratelimit import RateLimiter
+    real_init = RateLimiter.__init__
+    monkeypatch.setattr(RateLimiter, "__init__",
+                        lambda self, rpm, burst: real_init(self, rpm=60, burst=3))
+    client = _client(tmp_path)
+
+    codes = [client.get("/api/state", headers={"X-API-Token": "wrong"}).status_code
+             for _ in range(8)]
+    assert codes[:3] == [401, 401, 401]     # burst passes the limiter, guard rejects
+    assert 429 in codes[3:]                 # then the limiter throttles the brute-force
+
+
 def test_invalid_state_rejected(tmp_path):
     client = _client(tmp_path)
     fid = client.get("/api/state").json()["findings"][0]["id"]
