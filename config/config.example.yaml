@@ -55,7 +55,7 @@ ai:
 
 # Which SCM provides the repo inventory (scan surface).
 source:
-  provider: github    # bitbucket | github
+  provider: bitbucket    # bitbucket | github
 
 bitbucket:
   base_url: ${BITBUCKET_BASE_URL}
