@@ -114,6 +114,10 @@ openhack:
   max_files: 60          # cap source files reviewed per repo
   max_file_bytes: 60000  # skip files larger than this
   min_confidence: medium    # drop candidates below this confidence: low | medium | high
+  # Diagnostics: dump every raw finding per pass (pre-consolidation) to
+  # <output_dir>/passes-raw.json, to measure cross-model agreement before tuning
+  # the title matcher. Off by default.
+  debug_passes: false
 
 servicenow:
   instance: ${SERVICENOW_INSTANCE}

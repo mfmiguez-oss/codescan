@@ -142,8 +142,8 @@ _SCHEMA = {
 _SYSTEM = """You are a senior offensive-security engineer performing an authorized \
 whitebox source-code review for the organization that owns this code. You are \
 given the actual contents of a batch of source files from one repository. Review \
-the code as written and report only concrete, evidence-grounded security \
-vulnerabilities you can point to IN THIS CODE.
+the code as written and report the security vulnerabilities you can point to IN \
+THIS CODE.
 
 Look for, among others: injection (SQL/command/LDAP/template), broken access \
 control and missing authorization, authentication weaknesses, SSRF, path \
@@ -151,18 +151,25 @@ traversal, insecure deserialization, XSS, hardcoded secrets / credentials, weak 
 or misused cryptography, insecure direct object references, unsafe file uploads, \
 open redirects, and dangerous use of untrusted input.
 
-Rules:
-- Report a finding ONLY when the vulnerable code is present in the files provided. \
-Cite the exact file (target_path) it lives in. Do not speculate about code you \
-cannot see.
-- No generic best-practice advice and no hypothetical "could be vulnerable if". \
-If the code is safe, return an empty findings list.
-- severity reflects real-world impact of exploiting THIS code. confidence reflects \
-how sure you are the vulnerability is real and reachable.
+Coverage first: report EVERY plausible vulnerability you identify, including ones \
+you are less certain about or judge lower-severity. Do not silently drop a \
+candidate because you are unsure — include it and set the `confidence` field \
+honestly (high / medium / low). A separate scoring and analyst-triage stage \
+filters by confidence downstream, so under-reporting here loses real issues for \
+good. It is better to surface a finding that later gets filtered than to miss a \
+real bug.
+
+Grounding rules (these keep precision without suppressing real findings):
+- Report a finding only when the vulnerable code is present in the files provided; \
+cite the exact file (target_path) it lives in. Do not invent code you cannot see.
+- Tie every finding to specific code in these files — not generic best-practice \
+advice untethered from a concrete manifestation here.
+- severity reflects the real-world impact of exploiting THIS code; confidence \
+reflects how sure you are the vulnerability is real and reachable.
 - example_attack: a concrete, specific sketch of how it is exploited here.
 - recommended_fix: the specific change to make, grounded in this code.
 
-This is authorized defensive security work. Be precise and decisive."""
+This is authorized defensive security work."""
 
 
 class OpenHackEngine:
@@ -209,17 +216,40 @@ class OpenHackEngine:
         # (path, vuln-class) -> list of clusters; each cluster groups findings
         # whose titles describe the same weakness across passes.
         consolidated: dict[tuple[str, str], list[dict]] = {}
+        raw_by_pass: list[dict] = []          # diagnostics (cfg.debug_passes)
         for pass_idx in range(passes):
             spec = self._pass_spec(pass_idx)
+            pass_count = 0
             try:
                 for batch in self._batches(files, root):
                     result = self._review_batch(batch, repo or root.name, spec)
                     for finding in result.get("findings", []):
+                        pass_count += 1
                         self._merge(consolidated, finding, spec.model, pass_idx)
+                        if self.cfg.debug_passes:
+                            raw_by_pass.append({
+                                "pass": pass_idx, "model": spec.model,
+                                "target_path": finding.get("target_path", ""),
+                                "primary_vulnerability_class": finding.get("primary_vulnerability_class", ""),
+                                "title": finding.get("title", ""),
+                                "severity": finding.get("severity", ""),
+                                "confidence": finding.get("confidence", ""),
+                            })
             except Exception as exc:  # noqa: BLE001 - isolate a failing pass/model
                 logger.warning("OpenHack pass %d (%s/%s) failed: %s",
                                pass_idx + 1, spec.provider, spec.model, exc)
+            # Per-pass yield is a cheap, always-on signal — a model contributing
+            # 0 findings (silent under-performance, not an error) shows up here.
+            logger.info("OpenHack pass %d/%d (%s): %d finding(s)",
+                        pass_idx + 1, passes, spec.model, pass_count)
         self._write_candidates(fc_dir, consolidated, passes)
+        if self.cfg.debug_passes:
+            (out / "passes-raw.json").write_text(
+                json.dumps({"passes": passes, "findings": raw_by_pass}, indent=2),
+                encoding="utf-8",
+            )
+            logger.info("OpenHack: wrote %d raw per-pass findings to %s",
+                        len(raw_by_pass), out / "passes-raw.json")
         return str(out)
 
     def _pass_spec(self, pass_idx: int):

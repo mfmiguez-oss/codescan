@@ -542,10 +542,14 @@ openhack:
 The engine walks the repo, skips dependency/build/VCS dirs (`node_modules`,
 `vendor`, `dist`, `.git`, …), reviews the security-relevant files first (auth,
 handlers, queries, uploads, crypto), batches source within a character budget,
-and asks the model for concrete, code-grounded vulnerabilities (injection, broken
-access control, SSRF, path traversal, deserialization, hardcoded secrets, …).
-Route its model/effort via the `openhack` task (defaults to the deep default
-tier; set `claude-fable-5` for the deepest review).
+and asks the model for the code-grounded vulnerabilities it can point to
+(injection, broken access control, SSRF, path traversal, deserialization,
+hardcoded secrets, …). The prompt is **coverage-first** — report every plausible
+finding with an honest `confidence`, since precision is filtered downstream
+(`min_confidence`, scoring, analyst triage); this keeps recall high on
+literal-following models that would otherwise self-filter to nothing. Route its
+model/effort via the `openhack` task (defaults to the deep default tier; set
+`claude-fable-5` for the deepest review).
 
 **Multiple passes for recall.** AI source review is non-deterministic — a single
 pass can miss a real issue. The engine runs `openhack.passes` **independent review

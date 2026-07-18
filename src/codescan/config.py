@@ -147,6 +147,10 @@ class OpenHackConfig(_StrictModel):
     batch_chars: int = 48000    # per-request source budget (chars) across files
     min_confidence: str = "low"  # drop candidates below this confidence: low|medium|high
     include_ext: list[str] = [] # source extensions to review; empty = built-in set
+    # Diagnostics: dump every raw finding per pass (before cross-pass
+    # consolidation) to <output_dir>/passes-raw.json, so cross-model agreement
+    # can be measured before tuning the title matcher. Off by default.
+    debug_passes: bool = False
 
 
 class ServiceNowConfig(_StrictModel):

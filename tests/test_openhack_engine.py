@@ -194,6 +194,53 @@ def test_single_pass_has_no_agreement_signal(tmp_path):
     assert len(llm.calls) == 1
 
 
+def test_debug_passes_dumps_raw_per_pass_findings(tmp_path):
+    import json
+
+    repo = _repo_tree(tmp_path / "repo")
+    A = _cand("SQLi in login")
+    B = _cand("Path traversal in export", cls="path-traversal")
+    # Pass 1 finds A+B, pass 2 finds only A — raw dump must capture all 3 rows.
+    llm = FakeLLM(findings=None, per_call=[[A, B], [A]])
+    cfg = OpenHackConfig(passes=2, debug_passes=True, pass_models=[
+        TaskModel(model="claude-opus-4-8"),
+        TaskModel(model="gpt-5"),
+    ])
+    OpenHackEngine(llm, cfg).review(repo, tmp_path / "out", "a/b")
+
+    dump = json.loads((tmp_path / "out" / "passes-raw.json").read_text(encoding="utf-8"))
+    assert dump["passes"] == 2
+    rows = dump["findings"]
+    assert len(rows) == 3
+    # Each row records which pass/model produced it, before consolidation.
+    assert {(r["pass"], r["title"]) for r in rows} == {
+        (0, "SQLi in login"), (0, "Path traversal in export"), (1, "SQLi in login"),
+    }
+    assert {r["model"] for r in rows} == {"claude-opus-4-8", "gpt-5"}
+
+
+def test_debug_passes_off_by_default(tmp_path):
+    repo = _repo_tree(tmp_path / "repo")
+    OpenHackEngine(FakeLLM([_cand("SQLi in login")]), OpenHackConfig(passes=1)).review(
+        repo, tmp_path / "out", "a/b")
+    assert not (tmp_path / "out" / "passes-raw.json").exists()
+
+
+def test_per_pass_finding_count_is_logged(tmp_path, caplog):
+    import logging
+    repo = _repo_tree(tmp_path / "repo")
+    # Pass 1 finds one issue; pass 2 (different model) finds none.
+    llm = FakeLLM(findings=None, per_call=[[_cand("SQLi in login")], []])
+    cfg = OpenHackConfig(passes=2, pass_models=[
+        TaskModel(model="claude-opus-4-8"), TaskModel(model="gpt-5")])
+    with caplog.at_level(logging.INFO, logger="codescan.openhack_engine"):
+        OpenHackEngine(llm, cfg).review(repo, tmp_path / "out", "a/b")
+    msgs = [r.getMessage() for r in caplog.records]
+    # A zero-yield pass is visible without debug mode — the real signal.
+    assert any("pass 1/2 (claude-opus-4-8): 1 finding" in m for m in msgs)
+    assert any("pass 2/2 (gpt-5): 0 finding" in m for m in msgs)
+
+
 def test_engine_respects_min_confidence(tmp_path):
     repo = _repo_tree(tmp_path / "repo")
     llm = FakeLLM([

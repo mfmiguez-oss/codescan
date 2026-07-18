@@ -176,10 +176,20 @@ the SCA/CVE scanners never covered. There are three ways to produce them:
    multi-provider LLM harness (§5.5) — no external tool. It walks the source,
    skips dependency/build/VCS dirs, reviews the security-relevant files first
    (auth, handlers, queries, uploads, crypto), batches source within a character
-   budget, and asks the model (routed via the `openhack` task) for concrete,
-   code-grounded vulnerabilities, writing OpenHack-schema finding candidates the
-   connector ingests. This is what makes "auto" mode work inside codescan with the
-   AI stages enabled.
+   budget, and asks the model (routed via the `openhack` task) for the
+   code-grounded vulnerabilities it can point to in those files, writing
+   OpenHack-schema finding candidates the connector ingests. This is what makes
+   "auto" mode work inside codescan with the AI stages enabled.
+   The prompt is **coverage-first**: report every plausible finding and set an
+   honest `confidence`, because codescan already filters for precision
+   downstream (the `min_confidence` gate, the composite scorer, and analyst
+   triage). This matters for recall — literal-following models (Opus especially)
+   read a "report only concrete / be decisive" instruction as license to
+   self-filter to *nothing*; a per-batch probe on a real repo showed one such
+   model returning zero findings on code where another found a genuine SSRF, and
+   flipping the prompt to coverage-first recovered it (0 → 7). The anti-
+   hallucination rules stay: cite the exact file, no advice untethered from code
+   in these files.
 2. **External command.** Set `openhack.command` to shell out to a separate
    OpenHack install; `{repo_path}`/`{output_dir}` are substituted and AI-provider
    env is passed through. `openhack_runner.py` clones the repo, dispatches to the
@@ -212,6 +222,16 @@ and the agreement more meaningful — a finding confirmed by ≥2 models earns a
 `multi-model` tag (the note names them). Each pass is isolated: a failing model
 deployment is logged and skipped, and the union still benefits from the passes
 that ran. Fixtures under `fixtures/` drive the default UI and the test suite.
+
+**Measuring agreement (`openhack.debug_passes`, off by default).** Enabling this
+dumps every raw finding *before* consolidation to `<output_dir>/passes-raw.json`
+(pass index, model, path, class, title), so cross-model behaviour can be
+**measured** rather than guessed at. It earns its keep: on a real multi-family
+scan it showed the lack of corroboration was **not** a too-conservative title
+matcher (relaxing the threshold would have merged nothing) but one model
+contributing zero findings — the root cause the coverage-first prompt fix (§5.1
+above) then addressed. A per-pass finding count is also logged unconditionally,
+so a silent no-op model is visible in every run.
 
 **Repo source is pluggable.** The repo inventory comes from either Bitbucket
 Data Center (`bitbucket.py`) or GitHub / GitHub Enterprise Server (`github.py`),

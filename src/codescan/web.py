@@ -181,6 +181,7 @@ def sanitized_config(cfg: Config, known_models: list[str] | None = None) -> dict
             "max_files": cfg.openhack.max_files,
             "max_file_bytes": cfg.openhack.max_file_bytes,
             "min_confidence": cfg.openhack.min_confidence,
+            "debug_passes": cfg.openhack.debug_passes,
         },
         "servicenow": {
             "instance": cfg.servicenow.instance,
@@ -289,6 +290,7 @@ def apply_config(cfg: Config, update: dict) -> None:
         if conf not in ("low", "medium", "high"):
             raise ValueError("openhack.min_confidence must be low, medium, or high")
         cfg.openhack.min_confidence = conf
+    _set_bool(cfg.openhack, oh, "debug_passes")
 
     src = update.get("source", {})
     if "provider" in src:
