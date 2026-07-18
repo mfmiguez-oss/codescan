@@ -88,3 +88,25 @@ def test_run_surfaces_failure(tmp_path, monkeypatch):
     cfg = OpenHackConfig(auto=True, clone=False, workspace=str(tmp_path), command=["x"])
     with pytest.raises(RuntimeError, match="openhack exploded"):
         OpenHackRunner(cfg).run(_repo())
+
+
+def _raise_missing(cmd, **kw):
+    raise FileNotFoundError(2, "No such file or directory", cmd[0])
+
+
+def test_missing_git_is_an_actionable_error(tmp_path, monkeypatch):
+    # git absent from the runtime (e.g. a pre-git container image) must surface
+    # install guidance, not a raw FileNotFoundError traceback.
+    monkeypatch.setattr(ohr.subprocess, "run", _raise_missing)
+    cfg = OpenHackConfig(auto=True, clone=True, workspace=str(tmp_path), command=[])
+    repo = Repo(project_key="acme", slug="checkout", name="acme/checkout",
+                clone_url="https://github.com/acme/checkout.git")
+    with pytest.raises(RuntimeError, match="Install git in the runtime"):
+        OpenHackRunner(cfg, llm=object()).run(repo)
+
+
+def test_missing_external_command_is_an_actionable_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(ohr.subprocess, "run", _raise_missing)
+    cfg = OpenHackConfig(auto=True, clone=False, workspace=str(tmp_path), command=["mytool"])
+    with pytest.raises(RuntimeError, match="command not found: 'mytool'"):
+        OpenHackRunner(cfg).run(_repo())

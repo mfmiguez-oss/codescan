@@ -48,9 +48,9 @@ def test_config_override_wins_incl_model_family():
 
 
 def test_default_model_propagates():
-    cfg = AIConfig(model="gemini-2.5-pro")
+    cfg = AIConfig(model="mistral-large-2411")
     spec = ModelRouter(cfg).resolve("exploitability")   # unknown task -> default tier
-    assert spec.provider == "foundry" and spec.model == "gemini-2.5-pro"
+    assert spec.provider == "foundry" and spec.model == "mistral-large-2411"
 
 
 def test_override_layers_on_task_baseline():

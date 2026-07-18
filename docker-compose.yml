@@ -14,9 +14,12 @@ services:
       # Requires the connector credentials below.
       CODESCAN_LIVE: "false"
     # Secrets come from the environment (config uses ${ENV} interpolation).
-    # Copy .env.example -> .env and uncomment to load them.
-    # env_file:
-    #   - .env
+    # Copy .env.example -> .env and fill it in (FOUNDRY_API_KEY + FOUNDRY_RESOURCE
+    # at minimum for the AI stages). Optional: the offline fixtures demo runs
+    # without one.
+    env_file:
+      - path: .env
+        required: false
     volumes:
       # Persist outputs, validation state, and config overrides.
       - codescan-data:/data

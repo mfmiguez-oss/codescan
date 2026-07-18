@@ -1,11 +1,15 @@
 # codescan — container image for the web UI / API.
-# Runtime is pure Python; node/matplotlib (doc + diagram generation) are dev-only
-# and intentionally excluded.
+# Runtime is pure Python + git (the OpenHack whitebox engine clones the target
+# repo); node/matplotlib (doc + diagram generation) are dev-only and excluded.
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

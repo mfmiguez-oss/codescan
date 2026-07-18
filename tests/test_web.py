@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from codescan.web import create_app
@@ -333,24 +334,116 @@ def test_openhack_config(tmp_path):
     assert oh["command"] == "bash run.sh {repo_path} {output_dir}"
 
 
+@pytest.fixture(autouse=True)
+def _offline_foundry(monkeypatch):
+    """Keep tests offline: without credentials the deployment lookup raises
+    immediately and known_models falls back to the static list."""
+    for var in ("FOUNDRY_API_KEY", "AZURE_OPENAI_API_KEY",
+                "FOUNDRY_RESOURCE", "FOUNDRY_BASE_URL", "AZURE_OPENAI_BASE_URL"):
+        monkeypatch.delenv(var, raising=False)
+
+
 def test_ai_provider_config(tmp_path):
     client = _client(tmp_path)
     body = client.get("/api/config").json()
     assert body["ai"]["provider"] == "foundry"
     assert body["options"]["ai_providers"] == ["foundry"]
-    # The curated model list spans the four preferred families.
+    # No resource reachable -> the curated static list, spanning the preferred
+    # families (Gemini is deliberately absent — not served on Foundry).
     known = body["options"]["known_models"]
-    for model in ("claude-opus-4-8", "gpt-5", "gemini-2.5-pro", "mistral-large-2411"):
+    for model in ("claude-opus-4-8", "gpt-5", "mistral-large-2411"):
         assert model in known
+    assert not any("gemini" in m for m in known)
 
     updated = client.post("/api/config", json={
         "ai": {"model": "gpt-5",
-               "tasks": {"exploitability": {"model": "gemini-2.5-pro"}}},
+               "tasks": {"exploitability": {"model": "mistral-large-2411"}}},
     }).json()
     assert updated["ai"]["provider"] == "foundry" and updated["ai"]["model"] == "gpt-5"
-    assert updated["ai"]["tasks"]["exploitability"]["model"] == "gemini-2.5-pro"
+    assert updated["ai"]["tasks"]["exploitability"]["model"] == "mistral-large-2411"
     # Unknown provider rejected.
     assert client.post("/api/config", json={"ai": {"provider": "acme"}}).status_code == 400
+
+
+def test_known_models_prefers_live_foundry_deployments(tmp_path, monkeypatch):
+    import codescan.web as web_mod
+
+    client = _client(tmp_path)
+
+    class FakeProvider:
+        def list_deployments(self):
+            return ["Codestral-2501", "claude-opus-4-7", "gpt-5.6-luna"]
+
+    monkeypatch.setattr(web_mod, "get_provider", lambda name: FakeProvider())
+    body = client.get("/api/config").json()
+    # The UI's model suggestions are the resource's actual deployments…
+    assert body["options"]["known_models"] == ["Codestral-2501", "claude-opus-4-7", "gpt-5.6-luna"]
+
+    # …and the result is cached: a later failure doesn't drop the list.
+    def boom(name):
+        raise AssertionError("should not re-fetch within the cache window")
+    monkeypatch.setattr(web_mod, "get_provider", boom)
+    body = client.get("/api/config").json()
+    assert body["options"]["known_models"] == ["Codestral-2501", "claude-opus-4-7", "gpt-5.6-luna"]
+
+
+def test_scan_targets_github_repos_one_shot(tmp_path, monkeypatch):
+    import codescan.web as web_mod
+    from codescan.pipeline import PipelineResult
+
+    client = _client(tmp_path)          # startup scan runs on fixtures
+
+    captured = {}
+
+    class FakePipeline:
+        def __init__(self, cfg, *, offline=False, use_ai=True):
+            captured["cfg"] = cfg
+
+        def run(self, **kwargs):
+            return PipelineResult()
+
+    monkeypatch.setattr(web_mod, "Pipeline", FakePipeline)
+
+    r = client.post("/api/scan", json={"repos": ["acme/checkout", "acme/gateway"]})
+    assert r.status_code == 200
+    # The run was scoped to the GitHub targets…
+    assert captured["cfg"].source.provider == "github"
+    assert captured["cfg"].github.repos == ["acme/checkout", "acme/gateway"]
+    # …but the targeting is one-shot: the server's config is untouched.
+    body = client.get("/api/config").json()
+    assert body["source"]["provider"] == "bitbucket"
+
+
+def test_scan_whitebox_enables_builtin_engine(tmp_path, monkeypatch):
+    import codescan.web as web_mod
+    from codescan.pipeline import PipelineResult
+
+    client = _client(tmp_path)
+    captured = {}
+
+    class FakePipeline:
+        def __init__(self, cfg, *, offline=False, use_ai=True):
+            captured["cfg"] = cfg
+
+        def run(self, **kwargs):
+            return PipelineResult()
+
+    monkeypatch.setattr(web_mod, "Pipeline", FakePipeline)
+
+    r = client.post("/api/scan", json={"repos": ["acme/checkout"], "whitebox": True, "use_ai": True})
+    assert r.status_code == 200
+    cfg = captured["cfg"]
+    assert cfg.openhack.auto and cfg.openhack.clone and cfg.openhack.command == []
+
+
+def test_scan_target_validation(tmp_path):
+    client = _client(tmp_path)
+    # Malformed target -> 400 with the expected owner/name hint.
+    r = client.post("/api/scan", json={"repos": ["not-a-repo"]})
+    assert r.status_code == 400 and "owner/name" in r.json()["detail"]
+    # Whitebox needs the AI stages.
+    r = client.post("/api/scan", json={"repos": ["acme/checkout"], "whitebox": True, "use_ai": False})
+    assert r.status_code == 400 and "AI" in r.json()["detail"]
 
 
 def test_legacy_overrides_migrate_to_foundry(tmp_path):

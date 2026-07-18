@@ -150,6 +150,35 @@ def test_claude_request_uses_structured_outputs():
     assert captured["max_tokens"] == 500
 
 
+def test_structured_outputs_gap_falls_back_to_prompted_json():
+    # Some Foundry workspaces reject structured outputs (400) — the provider
+    # must retry with the schema prompted and parse the reply defensively.
+    calls = []
+
+    class _Messages:
+        def stream(self, **kwargs):
+            calls.append(kwargs)
+            if "format" in kwargs.get("output_config", {}):
+                raise RuntimeError(
+                    "Error code: 400 - structured_outputs not supported in your workspace."
+                )
+            return _FakeStream(_Msg(text='Sure: {"ok": true} — done.'))
+
+    class _Client:
+        messages = _Messages()
+
+    provider = FoundryProvider()
+    provider._anthropic_client = _Client()
+
+    out = provider.complete_json(_req(model="claude-haiku-4-5"))
+
+    assert out == {"ok": True}
+    assert len(calls) == 2
+    assert "format" in calls[0]["output_config"]              # tried native first
+    assert "output_config" not in calls[1] or "format" not in calls[1]["output_config"]
+    assert "single JSON object matching this schema" in calls[1]["system"]
+
+
 def test_claude_refusal_is_an_actionable_error():
     provider = FoundryProvider()
     provider._anthropic_client = _fake_anthropic({}, _Msg(stop_reason="refusal"))

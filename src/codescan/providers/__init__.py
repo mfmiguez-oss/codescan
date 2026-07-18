@@ -1,7 +1,7 @@
 """Provider registry — resolve a provider name to a shared instance.
 
 codescan accesses all AI models through Microsoft Foundry (`foundry`), which
-serves Anthropic, OpenAI, Google, and Mistral model deployments behind one
+serves Anthropic, OpenAI, and Mistral model deployments behind one
 resource. SDKs are imported lazily inside the provider, so importing this
 package never requires `anthropic` / `openai` to be installed. Add a supplier
 by writing an `LLMProvider` subclass and registering it in `_CLASSES`.

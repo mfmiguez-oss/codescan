@@ -11,7 +11,7 @@ Xray (and a built-in OpenHack whitebox engine) over a Bitbucket/GitHub repo
 inventory → dedup → enrich (KEV/EPSS/reachability) → AI exploitability + attack
 chains → composite score → validation states → ServiceNow export, with an
 analyst web UI. It is an **LLM application over hosted models** (Anthropic /
-OpenAI / Google / Mistral model deployments, all served through Microsoft
+OpenAI / Mistral model deployments, all served through Microsoft
 Foundry) — not a trained model.
 
 ## The gate — run before every commit

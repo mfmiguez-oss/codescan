@@ -14,8 +14,11 @@ from __future__ import annotations
 
 import hmac
 import json
+import logging
 import os
+import re
 import shlex
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,10 +32,12 @@ from .config import Config, TaskModel
 from .logging_setup import configure
 from .models import SERVICENOW_STATE, Finding, ValidationState
 from .pipeline import Pipeline, PipelineResult
-from .providers import PROVIDERS
+from .providers import PROVIDERS, get_provider
 from .ratelimit import RateLimiter
 from .servicenow import ServiceNowExporter, items_to_csv
 from .validation import CHAIN_KEY_PREFIX, CHAIN_STATES, active_chains, open_state_store
+
+logger = logging.getLogger(__name__)
 
 STATIC = Path(__file__).parent / "static"
 
@@ -91,15 +96,14 @@ def _dotted_keys(d: dict, prefix: str = "") -> list[str]:
             out.append(path)
     return out
 
-# Surfaced to the config UI for dropdowns. Preferred model deployments on
-# Microsoft Foundry, by family; any other deployment name can be typed freely.
+# Static fallback for the config UI's model suggestions, used when the Foundry
+# resource's live deployment list is unreachable (see AppState.known_models).
+# Preferred deployments by family; any other deployment name can be typed freely.
 KNOWN_MODELS = [
     # Anthropic
     "claude-fable-5", "claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5",
     # OpenAI
     "gpt-5", "gpt-5-mini",
-    # Google
-    "gemini-2.5-pro", "gemini-2.5-flash",
     # Mistral
     "mistral-large-2411", "mistral-medium-2505",
 ]
@@ -125,7 +129,7 @@ def _set_str(target: object, update: dict, field: str, *, strip: bool = True) ->
         setattr(target, field, str(value))
 
 
-def sanitized_config(cfg: Config) -> dict:
+def sanitized_config(cfg: Config, known_models: list[str] | None = None) -> dict:
     """Config for the UI — editable settings plus masked, read-only secrets."""
     return {
         "ai": {
@@ -197,7 +201,8 @@ def sanitized_config(cfg: Config) -> dict:
             "xray": {"base_url": cfg.xray.base_url, "token": _mask(cfg.xray.token)},
         },
         "options": {
-            "known_models": KNOWN_MODELS, "efforts": EFFORTS,
+            "known_models": known_models if known_models is not None else KNOWN_MODELS,
+            "efforts": EFFORTS,
             "routed_tasks": ROUTED_TASKS, "scm_providers": SCM_PROVIDERS,
             "ai_providers": PROVIDERS,
         },
@@ -390,6 +395,12 @@ class ScanRequest(BaseModel):
     use_ai: bool | None = None
     offline: bool | None = None
     live: bool | None = None       # scan live systems vs the configured fixtures
+    # One-shot GitHub targeting (mirrors `codescan scan --repo/--whitebox`):
+    # scope THIS scan to these 'owner/name' repos without changing the saved
+    # config. `whitebox` additionally reviews the source with the built-in
+    # OpenHack engine (needs AI).
+    repos: list[str] | None = None
+    whitebox: bool = False
 
 
 class StateChange(BaseModel):
@@ -409,6 +420,7 @@ class AppState:
         self.out_path = out_path
         self.state_path = state_path
         self.last_scan: str | None = None
+        self._models_cache: tuple[float, list[str]] | None = None
         self.overrides_path = Path(overrides_path) if overrides_path else None
         # Layer any UI-saved overrides on top of the base config.
         if self.overrides_path and self.overrides_path.exists():
@@ -425,6 +437,22 @@ class AppState:
         except Exception as exc:  # noqa: BLE001 - surface, don't fail startup
             self.startup_error = str(exc)
 
+    def known_models(self) -> list[str]:
+        """Model options for the config UI: the Foundry resource's live
+        deployments when reachable (cached), else the curated static list."""
+        now = time.monotonic()
+        if self._models_cache and now - self._models_cache[0] < 300:
+            return self._models_cache[1]
+        try:
+            models = get_provider("foundry").list_deployments()
+            if not models:
+                models = KNOWN_MODELS
+        except Exception as exc:  # noqa: BLE001 - suggestions only; degrade quietly
+            logger.debug("foundry deployment listing unavailable (%s); using static list", exc)
+            models = KNOWN_MODELS
+        self._models_cache = (now, models)
+        return models
+
     def update_config(self, update: dict, *, actor: str = "system") -> dict:
         apply_config(self.cfg, update)                  # validate + apply (raises on bad)
         if self.overrides_path:
@@ -436,17 +464,41 @@ class AppState:
         # Record which settings changed (names only — values may be verbose; secrets
         # never reach here, they stay in the environment).
         self.audit.record("config.changed", actor=actor, keys=sorted(_dotted_keys(update)))
-        return sanitized_config(self.cfg)
+        return sanitized_config(self.cfg, self.known_models())
 
-    def scan(self, use_ai=None, offline=None, live=None, *, actor: str = "system") -> PipelineResult:
+    def scan(self, use_ai=None, offline=None, live=None, *,
+             repos: list[str] | None = None, whitebox: bool = False,
+             actor: str = "system") -> PipelineResult:
         ai = self.use_ai if use_ai is None else use_ai
         off = self.offline if offline is None else offline
         lv = self.live if live is None else live
-        fx = None if lv else self.fixtures       # None -> live ingest
-        self.result = Pipeline(self.cfg, offline=off, use_ai=ai).run(
+
+        cfg = self.cfg
+        if repos or whitebox:
+            # One-shot GitHub targeting (mirrors `codescan scan --repo/--whitebox`):
+            # scope a deep copy so the server's persistent config is untouched.
+            bad = [r for r in (repos or []) if not re.fullmatch(r"[\w.-]+/[\w.-]+", r)]
+            if bad:
+                raise ValueError(
+                    f"invalid GitHub repo target(s): {', '.join(bad)} — expected owner/name"
+                )
+            if whitebox and not ai:
+                raise ValueError("whitebox review needs the AI stages — enable AI for this scan")
+            cfg = self.cfg.model_copy(deep=True)
+            cfg.source.provider = "github"
+            if repos:
+                cfg.github.repos = list(repos)
+            if whitebox:
+                cfg.openhack.auto = True
+                cfg.openhack.clone = True
+                cfg.openhack.command = []       # force the built-in engine
+
+        fx = None if (lv or repos or whitebox) else self.fixtures   # None -> live ingest
+        self.result = Pipeline(cfg, offline=off, use_ai=ai).run(
             fixtures=fx, out_path=self.out_path, state_path=self.state_path, actor=actor,
         )
-        # Remember what was actually run, so the UI reflects it.
+        # Remember what was actually run, so the UI reflects it (targeting is
+        # one-shot and deliberately not remembered).
         self.use_ai, self.offline, self.live = ai, off, lv
         self.startup_error = None
         self.last_scan = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -588,11 +640,15 @@ def create_app(
 
     @app.post("/api/scan")
     def scan(req: ScanRequest, request: Request) -> dict:
-        # Surface scan failures (e.g. live mode, invalid credentials) as an
-        # error banner rather than a 500 response — the previous result stays
-        # visible.
+        # A malformed request (bad repo target, whitebox without AI) is the
+        # caller's error -> 400. Scan *failures* (e.g. live mode, invalid
+        # credentials) surface as an error banner rather than a 500 response —
+        # the previous result stays visible.
         try:
-            state.scan(req.use_ai, req.offline, req.live, actor=_actor(request))
+            state.scan(req.use_ai, req.offline, req.live,
+                       repos=req.repos, whitebox=req.whitebox, actor=_actor(request))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         except Exception as exc:  # noqa: BLE001
             state.startup_error = str(exc)
         return _payload(state)
@@ -650,7 +706,7 @@ def create_app(
 
     @app.get("/api/config")
     def get_config() -> dict:
-        return sanitized_config(state.cfg)
+        return sanitized_config(state.cfg, state.known_models())
 
     @app.post("/api/config")
     def set_config(update: dict, request: Request) -> dict:

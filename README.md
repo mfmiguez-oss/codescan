@@ -89,12 +89,14 @@ are served by one **Azure AI Foundry** resource, and the model name decides
 which of the resource's two API surfaces a request uses — `claude-*`
 deployments get Anthropic's **native Messages API** (structured outputs,
 adaptive thinking, effort, client-side Fable refusal fallbacks), while any
-other deployment (**OpenAI GPT, Google Gemini, Mistral**, …) goes through the
+other deployment (**OpenAI GPT, Mistral**, …) goes through the
 resource's **OpenAI-compatible** endpoint with JSON mode + defensive parsing.
 Both SDKs are optional (`pip install -e ".[providers]"`) and imported lazily.
 
 Pick a model per task in config (or the Config tab) — the model is the
-deployment name on your Foundry resource:
+deployment name on your Foundry resource. The Config tab's model suggestions
+are the **live deployment list from the resource itself** (cached for five
+minutes; a curated static list when the resource isn't reachable):
 
 ```yaml
 ai:
@@ -103,7 +105,6 @@ ai:
   tasks:
     dedup:          { model: claude-haiku-4-5 }    # lower-cost, mechanical
     exploitability: { model: gpt-5 }               # different model family
-    threat_model:   { model: gemini-2.5-pro }
     enrichment:     { model: mistral-large-2411 }
 ```
 
@@ -384,7 +385,12 @@ composite risk), with filters (search, severity, state, repo, min risk) and
 signal badges (KEV, attack-chain membership, EPSS, reporting scanners).
 **Run scans from the UI**
 with the header's **Run scan** button and the **AI / offline / live** toggles —
-including on-demand **live** scans of Bitbucket/Snyk/Xray. A "last run" chip
+including on-demand **live** scans of Bitbucket/Snyk/Xray. To scan specific
+**GitHub repositories**, list them in the header field (`owner/name`,
+comma-separated) — optionally with the **whitebox** toggle to also review their
+source with the built-in OpenHack engine (needs AI) — and run: the targeting is
+one-shot (the UI equivalent of `codescan scan --repo … --whitebox`) and doesn't
+change the configured repo source. A "last run" chip
 shows when it last ran; a failed run (e.g. live mode without credentials) keeps
 the previous results and surfaces the error in a banner instead of crashing.
 Click a finding for the detail drawer: CVSS vector, EPSS, reachability,
@@ -443,8 +449,8 @@ Flags: `--no-ai` (deterministic only), `--offline` (skip KEV/EPSS network calls)
 `--sn-format json|csv` (write a CSV for ServiceNow CSV Import Sets instead of
 JSON — also settable in config/UI), `--repo owner/name` (scan specific GitHub
 repo(s); implies GitHub source + a live scan; repeatable), `--whitebox` (review
-the target repo's source with the built-in OpenHack AI engine; needs AI + git,
-skips uncredentialed Snyk/Xray — see below).
+the target repo's source with the built-in OpenHack AI engine; needs AI + git —
+the Docker image includes git — skips uncredentialed Snyk/Xray — see below).
 
 Scan a specific GitHub repo:
 

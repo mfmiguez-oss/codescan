@@ -7,7 +7,7 @@ decides which of the resource's two API surfaces a request uses:
   (`anthropic.AnthropicFoundry`): structured outputs, adaptive thinking,
   effort, and client-side Fable refusal fallbacks (Foundry has no server-side
   fallback support, so the SDK middleware re-serves refusals on Opus).
-* everything else (OpenAI GPT, Google Gemini, Mistral, or any other Foundry
+* everything else (OpenAI GPT, Mistral, or any other Foundry
   deployment) → the resource's OpenAI-compatible chat-completions endpoint via
   the ``openai`` SDK, with JSON mode + defensive parsing.
 
@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from urllib.parse import urlsplit
 
 from .base import CompletionRequest, LLMProvider, build_json_instruction, extract_json
 
@@ -128,6 +129,41 @@ class FoundryProvider(LLMProvider):
                 self._openai_client = OpenAI(api_key=api_key, base_url=base_url)
         return self._openai_client
 
+    # --- resource introspection -------------------------------------------
+
+    def list_deployments(self) -> list[str]:
+        """Names of the model deployments on the Foundry resource.
+
+        These are the values `ai.model` / task routes can be set to. Uses the
+        resource's data-plane deployments endpoint with the same API key as
+        inference. Raises on missing credentials or an unreachable resource —
+        callers that only *suggest* models (the config UI) degrade to a static
+        list.
+        """
+        import requests
+
+        api_key = _env("FOUNDRY_API_KEY", "AZURE_OPENAI_API_KEY")
+        resource = _env("FOUNDRY_RESOURCE")
+        base_url = _env("FOUNDRY_BASE_URL", "AZURE_OPENAI_BASE_URL")
+        if not api_key:
+            raise RuntimeError("FOUNDRY_API_KEY (or AZURE_OPENAI_API_KEY) is not set")
+        if resource:
+            root = f"https://{resource}.services.ai.azure.com"
+        elif base_url:
+            parts = urlsplit(base_url)
+            root = f"{parts.scheme}://{parts.netloc}"
+        else:
+            raise RuntimeError("FOUNDRY_RESOURCE (or FOUNDRY_BASE_URL) is not set")
+
+        resp = requests.get(
+            f"{root}/openai/deployments",
+            params={"api-version": "2023-03-15-preview"},
+            headers={"api-key": api_key}, timeout=15,
+        )
+        resp.raise_for_status()
+        names = [d["id"] for d in resp.json().get("data", []) if d.get("id")]
+        return sorted(names, key=str.lower)
+
     # --- request paths ----------------------------------------------------
 
     def complete_json(self, req: CompletionRequest) -> dict:
@@ -136,14 +172,36 @@ class FoundryProvider(LLMProvider):
         return self._complete_openai_compat(req)
 
     def _complete_anthropic(self, req: CompletionRequest) -> dict:
-        """Native Messages API: structured outputs guarantee valid JSON back."""
-        output_config: dict = {"format": {"type": "json_schema", "schema": req.schema}}
+        """Native Messages API — structured outputs guarantee valid JSON back.
+
+        Foundry workspaces don't all support structured outputs (it's in beta
+        there, per model/workspace); on that specific 400 the request retries
+        once with the schema prompted instead and the reply parsed defensively.
+        """
+        try:
+            return self._anthropic_call(req, structured=True)
+        except Exception as exc:  # noqa: BLE001 - retry only the known capability gap
+            if "structured_outputs not supported" not in str(exc):
+                raise
+            logger.info("foundry: structured outputs unsupported for %s in this "
+                        "workspace — falling back to prompted JSON", req.model)
+            return self._anthropic_call(req, structured=False)
+
+    def _anthropic_call(self, req: CompletionRequest, *, structured: bool) -> dict:
+        output_config: dict = {}
+        system = req.system
+        if structured:
+            output_config["format"] = {"type": "json_schema", "schema": req.schema}
+        else:
+            system = system + "\n\n" + build_json_instruction(req)
         if _has(req.model, _EFFORT_MODELS):
             output_config["effort"] = req.effort
         kwargs: dict = dict(
-            model=req.model, max_tokens=req.max_tokens, system=req.system,
-            messages=[{"role": "user", "content": req.user}], output_config=output_config,
+            model=req.model, max_tokens=req.max_tokens, system=system,
+            messages=[{"role": "user", "content": req.user}],
         )
+        if output_config:
+            kwargs["output_config"] = output_config
         if _has(req.model, _ADAPTIVE_MODELS):
             kwargs["thinking"] = {"type": "adaptive"}
 
@@ -163,7 +221,7 @@ class FoundryProvider(LLMProvider):
                 "If this recurs, route the task to claude-opus-4-8 (ai.tasks.<task>.model)."
             )
         text = next((b.text for b in msg.content if b.type == "text"), "{}")
-        return json.loads(text)
+        return json.loads(text) if structured else extract_json(text)
 
     def _complete_openai_compat(self, req: CompletionRequest) -> dict:
         """Chat completions: JSON mode + schema in the prompt, parsed defensively."""

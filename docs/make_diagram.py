@@ -114,7 +114,7 @@ def main() -> None:
     ax.text(64, 608, "Deterministic (no API key)", fontsize=10, va="center", color="#334155")
     ax.add_patch(FancyBboxPatch((420, 600), 16, 16, boxstyle="round,pad=0,rounding_size=3",
                                 facecolor="#e8f0ff", edgecolor="#3b6fe0", linewidth=1))
-    ax.text(444, 608, "AI stage (LLM) — routed by model tier via Microsoft Foundry (Claude / GPT / Gemini / Mistral)", fontsize=10, va="center", color="#334155")
+    ax.text(444, 608, "AI stage (LLM) — routed by model tier via Microsoft Foundry (Claude / GPT / Mistral)", fontsize=10, va="center", color="#334155")
 
     out = Path(__file__).with_name("architecture.png")
     fig.savefig(out, dpi=200, bbox_inches="tight", facecolor="white")

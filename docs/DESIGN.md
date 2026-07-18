@@ -309,8 +309,8 @@ are served by one Microsoft **Azure AI Foundry** resource (`FOUNDRY_API_KEY` +
 `FOUNDRY_API_VERSION` for classic Azure OpenAI endpoints). The model name picks
 the API surface: `claude-*` deployments use Anthropic's **native Messages API**
 on the resource (structured outputs, adaptive thinking, effort, client-side
-Fable refusal fallbacks), while any other deployment — OpenAI GPT, Google
-Gemini, Mistral, … — uses the resource's **OpenAI-compatible** endpoint (JSON
+Fable refusal fallbacks), while any other deployment — OpenAI GPT, Mistral,
+… — uses the resource's **OpenAI-compatible** endpoint (JSON
 mode + defensive parsing). Both paths implement the same
 `complete_json(request) -> dict` contract; SDKs are imported lazily, so they're
 optional deps. `ModelRouter` resolves a task to a `ModelSpec(provider, model,
@@ -327,7 +327,9 @@ Different tasks need different intelligence tiers:
 
 The provider adapts each request to the model's capabilities so callers never
 have to: it omits `effort`/adaptive-thinking for models that don't support them
-(Haiku), and registers the Anthropic SDK's client-side **refusal fallback** for
+(Haiku), retries with the schema **prompted instead of enforced** when a Foundry
+workspace rejects structured outputs (beta there, per model/workspace), and
+registers the Anthropic SDK's client-side **refusal fallback** for
 Fable/Mythos (security tooling can trip false-positive classifier refusals; the
 request transparently re-serves on Opus 4.8 — Foundry has no server-side
 fallback support). Config `ai.tasks.<name>` overrides any field per task.
@@ -556,14 +558,21 @@ stops counting on the next scan. The views:
 - **Config** — edit non-secret settings live: the repo source (Bitbucket/GitHub)
   and GitHub repo/org targets, default AI tier, per-task model routing,
   enrichment toggles, scoring weights, and the ServiceNow push flag/format.
-  Secrets are shown masked and read-only (they stay in the environment). Edits
-  apply to the next scan and persist to `config.overrides.json`, layered over
-  the base config on restart. `POST` is validated server-side and rejected with
-  400 on bad input.
+  Model suggestions are the Foundry resource's **live deployment list**
+  (fetched with the inference API key, cached five minutes; a curated static
+  list when the resource isn't reachable). Secrets are shown masked and
+  read-only (they stay in the environment). Edits apply to the next scan and
+  persist to `config.overrides.json`, layered over the base config on restart.
+  `POST` is validated server-side and rejected with 400 on bad input.
 
 Scans run from the header (AI / offline / live toggles + Run scan) via
 `POST /api/scan`, in-process, recording a last-run timestamp. On-demand **live**
-scans of Bitbucket/Snyk/Xray are supported (not just the boot mode). A failed
+scans of Bitbucket/Snyk/Xray are supported (not just the boot mode), and the
+request can carry **one-shot GitHub targets** (`repos: ["owner/name", …]`, plus
+`whitebox` for a built-in OpenHack source review — the UI equivalent of
+`scan --repo/--whitebox`): the run is scoped on a deep copy of the config, so
+the server's configured source is untouched. Malformed targets or whitebox
+without AI are the caller's error and return 400. A failed
 run — e.g. live mode without credentials — is caught and shown in an error
 banner with the last good result preserved, rather than returning a 500;
 `/healthz` backs the container probe.

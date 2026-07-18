@@ -79,7 +79,13 @@ class OpenHackRunner:
             arg.replace("{repo_path}", str(repo_path)).replace("{output_dir}", str(out_dir))
             for arg in self.cfg.command
         ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, env=os.environ.copy())
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, env=os.environ.copy())
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                f"OpenHack command not found: '{cmd[0]}' — install it in the "
+                "runtime, or clear openhack.command to use the built-in engine."
+            ) from exc
         if proc.returncode != 0:
             tail = (proc.stderr or proc.stdout or "").strip()[-400:]
             raise RuntimeError(f"OpenHack run failed ({' '.join(cmd)}): {tail}")
@@ -87,9 +93,18 @@ class OpenHackRunner:
 
     @staticmethod
     def _git_clone(url: str, dest: Path) -> None:
-        proc = subprocess.run(
-            ["git", "clone", "--depth", "1", url, str(dest)],
-            capture_output=True, text=True,
-        )
+        try:
+            proc = subprocess.run(
+                ["git", "clone", "--depth", "1", url, str(dest)],
+                capture_output=True, text=True,
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "whitebox review clones the target repo with git, but the `git` "
+                "executable was not found on this host. Install git in the runtime "
+                "(the provided Dockerfile includes it — rebuild the image if yours "
+                f"predates that), or place the source at {dest} and disable "
+                "openhack.clone."
+            ) from exc
         if proc.returncode != 0:
             raise RuntimeError(f"git clone failed: {(proc.stderr or '').strip()[-300:]}")

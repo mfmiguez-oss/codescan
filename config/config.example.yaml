@@ -6,7 +6,7 @@ ai:
   # FOUNDRY_API_KEY + FOUNDRY_RESOURCE (or FOUNDRY_BASE_URL / AZURE_OPENAI_*
   # equivalents). `model` is the deployment name on your Foundry resource —
   # claude-* deployments use Anthropic's native Messages API; any other family
-  # (OpenAI GPT, Google Gemini, Mistral, ...) uses the resource's
+  # (OpenAI GPT, Mistral, ...) uses the resource's
   # OpenAI-compatible endpoint.
   provider: foundry
   # Set to claude-fable-5 for the hardest analysis (the client auto-enables
@@ -40,7 +40,6 @@ ai:
       # model: claude-fable-5
       # Or route this task to a different model family on your Foundry resource:
       # model: gpt-5
-      # model: gemini-2.5-pro
       # model: mistral-large-2411
     enrichment:           # AI remediation guidance + tags (lower-cost, mechanical)
       model: claude-haiku-4-5

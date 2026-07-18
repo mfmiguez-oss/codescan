@@ -45,7 +45,7 @@ class AIConfig(_StrictModel):
     # Default tier — used by any task without a more specific override. All models
     # are served through Microsoft Foundry: claude-* deployments use Anthropic's
     # native Messages API on the resource; any other deployment (OpenAI GPT,
-    # Google Gemini, Mistral, ...) uses its OpenAI-compatible endpoint.
+    # Mistral, ...) uses its OpenAI-compatible endpoint.
     provider: str = "foundry"
     model: str = "claude-opus-4-8"   # Foundry model deployment name
     effort: str = "high"

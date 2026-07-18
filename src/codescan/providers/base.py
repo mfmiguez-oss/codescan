@@ -32,6 +32,10 @@ class LLMProvider:
     def complete_json(self, req: CompletionRequest) -> dict:  # pragma: no cover - interface
         raise NotImplementedError
 
+    def list_deployments(self) -> list[str]:  # pragma: no cover - interface
+        """Model deployment names available from this provider (UI suggestions)."""
+        raise NotImplementedError
+
 
 def build_json_instruction(req: CompletionRequest) -> str:
     """Return the shared schema-guidance text appended to provider prompts."""

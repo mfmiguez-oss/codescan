@@ -24,7 +24,7 @@ flowchart LR
   KEV(["CISA KEV"]) -->|"exploited-CVE catalog"| CS
   EPSS(["FIRST EPSS"]) -->|"exploit probabilities"| CS
 
-  CS -->|"finding metadata digests<br/>+ source excerpts, OpenHack only"| AI(["Microsoft Foundry:<br/>Claude / GPT / Gemini / Mistral"])
+  CS -->|"finding metadata digests<br/>+ source excerpts, OpenHack only"| AI(["Microsoft Foundry:<br/>Claude / GPT / Mistral"])
   AI -->|"structured assessments:<br/>scores, chains, threat models"| CS
 
   VLT(["HashiCorp Vault"]) -->|"secrets, at startup"| CS
@@ -111,7 +111,7 @@ flowchart LR
 
   subgraph aiproviders ["Trust boundary: Microsoft Foundry"]
     ANT["Anthropic Messages API<br/>claude-* deployments"]
-    OAI["OpenAI-compatible endpoint<br/>GPT / Gemini / Mistral deployments"]
+    OAI["OpenAI-compatible endpoint<br/>GPT / Mistral deployments"]
   end
 
   subgraph public ["Trust boundary: public internet"]
