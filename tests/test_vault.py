@@ -40,12 +40,12 @@ class FakeVault:
 
 
 def test_injects_kv_v2_secrets_into_env():
-    client = FakeVault({"codescan": {"SNYK_TOKEN": "s3cr3t", "ANTHROPIC_API_KEY": "sk-x"}})
+    client = FakeVault({"codescan": {"SNYK_TOKEN": "s3cr3t", "FOUNDRY_API_KEY": "sk-x"}})
     cfg = VaultConfig(enabled=True, paths=["codescan"])
     n = load_secrets_into_env(cfg, client=client)
     assert n == 2
     assert os.environ["SNYK_TOKEN"] == "s3cr3t"
-    assert os.environ["ANTHROPIC_API_KEY"] == "sk-x"
+    assert os.environ["FOUNDRY_API_KEY"] == "sk-x"
 
 
 def test_existing_env_wins_unless_override():

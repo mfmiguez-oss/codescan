@@ -100,7 +100,7 @@ def serve(
     fixtures: str = typer.Option("fixtures", help="Fixtures dir for offline scans."),
     host: str = typer.Option("127.0.0.1"),
     port: int = typer.Option(8000),
-    ai: bool = typer.Option(False, "--ai", help="Enable the AI stages (needs ANTHROPIC_API_KEY)."),
+    ai: bool = typer.Option(False, "--ai", help="Enable the AI stages (needs FOUNDRY_API_KEY)."),
     live: bool = typer.Option(False, "--live", help="Scan live systems instead of fixtures."),
 ) -> None:
     """Launch the web UI (analyst triage dashboard)."""

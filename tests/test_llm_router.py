@@ -20,47 +20,47 @@ def test_unknown_config_key_is_rejected():
 def test_dedup_defaults_to_haiku():
     spec = ModelRouter(AIConfig()).resolve("dedup")
     assert spec.model == "claude-haiku-4-5"
-    assert spec.provider == "anthropic"
+    assert spec.provider == "foundry"
 
 
 def test_unknown_task_uses_default_tier():
     router = ModelRouter(AIConfig(model="claude-opus-4-8", effort="high", max_tokens=32000))
     spec = router.resolve("exploitability")
-    assert (spec.provider, spec.model, spec.effort) == ("anthropic", "claude-opus-4-8", "high")
+    assert (spec.provider, spec.model, spec.effort) == ("foundry", "claude-opus-4-8", "high")
 
 
-def test_config_override_wins_incl_provider():
+def test_config_override_wins_incl_model_family():
     cfg = AIConfig(
-        provider="anthropic", model="claude-opus-4-8",
+        model="claude-opus-4-8",
         tasks={
             "dedup": TaskModel(model="claude-sonnet-5", max_tokens=5000),
-            # Route exploitability to a different supplier entirely.
-            "exploitability": TaskModel(provider="openai", model="gpt-5", effort="high"),
+            # Route exploitability to a different model family on the resource.
+            "exploitability": TaskModel(model="gpt-5", effort="high"),
         },
     )
     router = ModelRouter(cfg)
     dedup = router.resolve("dedup")
     assert dedup.model == "claude-sonnet-5" and dedup.max_tokens == 5000
-    assert dedup.provider == "anthropic"
+    assert dedup.provider == "foundry"
 
     exploit = router.resolve("exploitability")
-    assert exploit.provider == "openai" and exploit.model == "gpt-5"
+    assert exploit.provider == "foundry" and exploit.model == "gpt-5"
 
 
-def test_default_provider_propagates():
-    cfg = AIConfig(provider="google", model="gemini-2.5-pro")
+def test_default_model_propagates():
+    cfg = AIConfig(model="gemini-2.5-pro")
     spec = ModelRouter(cfg).resolve("exploitability")   # unknown task -> default tier
-    assert spec.provider == "google" and spec.model == "gemini-2.5-pro"
+    assert spec.provider == "foundry" and spec.model == "gemini-2.5-pro"
 
 
 def test_override_layers_on_task_baseline():
-    # Per-pass supplier override (openhack.pass_models) — unset fields inherit.
+    # Per-pass model override (openhack.pass_models) — unset fields inherit.
     router = ModelRouter(AIConfig(model="claude-opus-4-8", effort="high"))
-    full = router.override("openhack", TaskModel(provider="openai", model="gpt-5"))
-    assert (full.provider, full.model, full.effort) == ("openai", "gpt-5", "high")
+    full = router.override("openhack", TaskModel(model="gpt-5"))
+    assert (full.provider, full.model, full.effort) == ("foundry", "gpt-5", "high")
 
     partial = router.override("openhack", TaskModel(effort="low"))
-    assert partial.provider == "anthropic"          # inherited from the baseline
+    assert partial.provider == "foundry"            # inherited from the baseline
     assert partial.model == "claude-opus-4-8"
     assert partial.effort == "low"                   # overridden
 
@@ -71,13 +71,13 @@ def test_partial_override_inherits_default():
     spec = ModelRouter(cfg).resolve("dedup")
     assert spec.model == "claude-haiku-4-5"      # built-in
     assert spec.effort == "medium"               # overridden
-    assert spec.provider == "anthropic"          # inherited
+    assert spec.provider == "foundry"            # inherited
 
 
 # --- auto-route (silent adaptive model selection) --------------------------
 
 def _opus():
-    return ModelSpec("anthropic", "claude-opus-4-8", "high", 32000)
+    return ModelSpec("foundry", "claude-opus-4-8", "high", 32000)
 
 
 def test_auto_route_off_by_default_no_shift():
@@ -95,15 +95,16 @@ def test_auto_route_downgrades_and_upgrades():
 
 def test_auto_route_clamps_at_ladder_ends():
     # Haiku can't go lower; Fable can't go higher.
-    assert auto_route(ModelSpec("anthropic", "claude-haiku-4-5", "low", 8000), "low").model == "claude-haiku-4-5"
-    assert auto_route(ModelSpec("anthropic", "claude-fable-5", "high", 32000), "high").model == "claude-fable-5"
+    assert auto_route(ModelSpec("foundry", "claude-haiku-4-5", "low", 8000), "low").model == "claude-haiku-4-5"
+    assert auto_route(ModelSpec("foundry", "claude-fable-5", "high", 32000), "high").model == "claude-fable-5"
 
 
-def test_auto_route_leaves_custom_and_other_suppliers_alone():
-    # A model not on the ladder is never shifted.
-    assert auto_route(ModelSpec("anthropic", "claude-opus-4-6", "high", 32000), "low").model == "claude-opus-4-6"
-    # Non-Anthropic provider is never shifted.
-    assert auto_route(ModelSpec("openai", "gpt-5", "high", 32000), "high").model == "gpt-5"
+def test_auto_route_leaves_off_ladder_models_alone():
+    # A model not on the ladder is never shifted — custom Claude deployments
+    # and other model families alike.
+    assert auto_route(ModelSpec("foundry", "claude-opus-4-6", "high", 32000), "low").model == "claude-opus-4-6"
+    assert auto_route(ModelSpec("foundry", "gpt-5", "high", 32000), "high").model == "gpt-5"
+    assert auto_route(ModelSpec("foundry", "mistral-large-2411", "high", 32000), "high").model == "mistral-large-2411"
 
 
 def test_auto_route_preserves_effort_and_tokens():

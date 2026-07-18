@@ -24,7 +24,7 @@ flowchart LR
   KEV(["CISA KEV"]) -->|"exploited-CVE catalog"| CS
   EPSS(["FIRST EPSS"]) -->|"exploit probabilities"| CS
 
-  CS -->|"finding metadata digests<br/>+ source excerpts, OpenHack only"| AI(["AI providers:<br/>Anthropic / OpenAI / Google"])
+  CS -->|"finding metadata digests<br/>+ source excerpts, OpenHack only"| AI(["Microsoft Foundry:<br/>Claude / GPT / Gemini / Mistral"])
   AI -->|"structured assessments:<br/>scores, chains, threat models"| CS
 
   VLT(["HashiCorp Vault"]) -->|"secrets, at startup"| CS
@@ -109,10 +109,9 @@ flowchart LR
     SNOW["ServiceNow VR"]
   end
 
-  subgraph aiproviders ["Trust boundary: AI providers"]
-    ANT["Anthropic"]
-    OAI["OpenAI-compatible"]
-    GGL["Google Gemini"]
+  subgraph aiproviders ["Trust boundary: Microsoft Foundry"]
+    ANT["Anthropic Messages API<br/>claude-* deployments"]
+    OAI["OpenAI-compatible endpoint<br/>GPT / Gemini / Mistral deployments"]
   end
 
   subgraph public ["Trust boundary: public internet"]
@@ -127,24 +126,23 @@ flowchart LR
   APP -->|"no auth, read-only:<br/>CVE ids only"| EPSSSRC
   APP -->|"API key: finding METADATA digests, no source code<br/>exception: OpenHack sends selected first-party files"| ANT
   APP -->|"API key: same contract"| OAI
-  APP -->|"API key: same contract"| GGL
   APP -->|"basic auth, write to<br/>import table only"| SNOW
 ```
 
 **Data at rest** (all inside the org boundary): the validation state store
 (decisions, machine-belief snapshots, analyst notes), the append-only audit
 log, threat models, the ServiceNow import file, and config overrides. codescan
-persists nothing outside the org boundary; what the AI providers and
-ServiceNow retain is governed by the org's contracts with them
-(`ai.inference_geo` selects Anthropic data residency; DESIGN.md §8 documents
-the disable/route-to-approved-deployment options).
+persists nothing outside the org boundary; what Microsoft Foundry and
+ServiceNow retain is governed by the org's contracts with them (data residency
+follows the Azure region of the Foundry resource; DESIGN.md §8 documents the
+disable/route-to-approved-deployment options).
 
 **Crossing summary per boundary:**
 
 | Boundary crossed | Data out | Data in | Control |
 |---|---|---|---|
 | → SaaS scanners/SCM | tokens (headers only) | findings, repo inventory, source (OpenHack) | read-only tokens, TLS |
-| → AI providers | finding metadata digests, triage-history counts/notes; source files **only** when OpenHack enabled | structured JSON assessments | `--no-ai` / per-stage toggles, `inference_geo`, bounded file limits |
+| → Microsoft Foundry | finding metadata digests, triage-history counts/notes; source files **only** when OpenHack enabled | structured JSON assessments | `--no-ai` / per-stage toggles, Azure region of the resource, bounded file limits |
 | → public enrichment | CVE identifiers only | KEV membership, EPSS scores | `--offline` skips entirely |
 | → ServiceNow | scored vulnerable items incl. rationales | import results | write scoped to import table, idempotent `correlation_id` |
 | → SIEM | audit events (actor, action, timestamps) | — | best-effort push; local file stays durable record |

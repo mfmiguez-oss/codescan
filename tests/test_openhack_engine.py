@@ -27,9 +27,8 @@ class FakeLLM:
         self.calls = []
 
     def resolve_spec(self, task, override=None):
-        provider = (override.provider if override and override.provider else "anthropic")
         model = (override.model if override and override.model else "m")
-        return ModelSpec(provider, model, "high", 8000)
+        return ModelSpec("foundry", model, "high", 8000)
 
     def complete_json(self, task, system, user, schema, **kwargs):
         self.calls.append({"task": task, "user": user, **kwargs})
@@ -108,23 +107,23 @@ def test_multi_pass_unions_findings_for_recall(tmp_path):
     assert "2 of 2" in findings["SQLi in login"].description
 
 
-def test_passes_route_to_different_suppliers(tmp_path):
+def test_passes_route_to_different_models(tmp_path):
     repo = _repo_tree(tmp_path / "repo")
     llm = FakeLLM([_cand("SQLi in login")])   # every pass finds the same issue
     cfg = OpenHackConfig(passes=2, pass_models=[
-        TaskModel(provider="anthropic", model="claude-opus-4-8"),
-        TaskModel(provider="openai", model="gpt-5"),
+        TaskModel(model="claude-opus-4-8"),
+        TaskModel(model="gpt-5"),
     ])
     out_dir = OpenHackEngine(llm, cfg).review(repo, tmp_path / "out", "a/b")
 
-    # Each pass used a different supplier's spec.
-    providers = [c["spec"].provider for c in llm.calls]
-    assert providers == ["anthropic", "openai"]
-    # A finding seen by both suppliers is tagged multi-supplier + corroborated,
-    # and the note names the suppliers.
+    # Each pass used a different model's spec.
+    models = [c["spec"].model for c in llm.calls]
+    assert models == ["claude-opus-4-8", "gpt-5"]
+    # A finding seen by both models is tagged multi-model + corroborated,
+    # and the note names the models.
     f = OpenHackConnector().from_dir(out_dir, "a/b")[0]
-    assert "multi-supplier" in f.tags and "corroborated" in f.tags
-    assert "anthropic, openai" in f.description
+    assert "multi-model" in f.tags and "corroborated" in f.tags
+    assert "claude-opus-4-8, gpt-5" in f.description
 
 
 def test_failing_pass_is_isolated(tmp_path):
@@ -133,17 +132,17 @@ def test_failing_pass_is_isolated(tmp_path):
     class FlakyLLM(FakeLLM):
         def complete_json(self, task, system, user, schema, **kwargs):
             self.calls.append({"spec": kwargs.get("spec")})
-            if len(self.calls) == 2:               # 2nd pass (e.g. missing key)
-                raise RuntimeError("openai: no API key")
+            if len(self.calls) == 2:               # 2nd pass (e.g. missing deployment)
+                raise RuntimeError("gpt-5: deployment not found")
             return {"findings": self.findings}
 
     llm = FlakyLLM([_cand("SQLi in login")])
     cfg = OpenHackConfig(passes=2, pass_models=[
-        TaskModel(provider="anthropic", model="claude-opus-4-8"),
-        TaskModel(provider="openai", model="gpt-5"),
+        TaskModel(model="claude-opus-4-8"),
+        TaskModel(model="gpt-5"),
     ])
     out_dir = OpenHackEngine(llm, cfg).review(repo, tmp_path / "out", "a/b")
-    # Pass 1 (anthropic) still produced the finding despite pass 2 failing.
+    # Pass 1 (claude) still produced the finding despite pass 2 failing.
     titles = {f.title for f in OpenHackConnector().from_dir(out_dir, "a/b")}
     assert titles == {"SQLi in login"}
 

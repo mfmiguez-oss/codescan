@@ -1,10 +1,10 @@
-"""Task-based model routing over the multi-provider harness.
+"""Task-based model routing over the Microsoft Foundry provider.
 
 Each pipeline task resolves to a `ModelSpec` (provider + model + effort + token
-budget). `LLMClient.complete_json` dispatches to the resolved supplier via the
-provider registry, so different tasks can run on different models from different
-suppliers — e.g. dedup on Anthropic Haiku, exploitability on OpenAI, threat
-modeling on Google — all set in config.
+budget). `LLMClient.complete_json` dispatches through the provider registry, so
+different tasks can run on different Foundry model deployments — e.g. dedup on
+Claude Haiku, exploitability on Claude Opus, threat modeling on GPT or Mistral
+— all set in config.
 """
 
 from __future__ import annotations
@@ -40,13 +40,14 @@ class ModelSpec:
 # Built-in per-task tiers. Anything not listed uses the default tier (config
 # ai.provider/model/effort/max_tokens). Config ai.tasks.<name> overrides.
 _BUILTIN_TASKS: dict[str, ModelSpec] = {
-    "dedup": ModelSpec("anthropic", "claude-haiku-4-5", "low", 8000),
-    "enrichment": ModelSpec("anthropic", "claude-haiku-4-5", "low", 8000),
+    "dedup": ModelSpec("foundry", "claude-haiku-4-5", "low", 8000),
+    "enrichment": ModelSpec("foundry", "claude-haiku-4-5", "low", 8000),
 }
 
-# Anthropic capability ladder, cheapest → most capable. `auto_route` shifts a task's
+# Claude capability ladder, cheapest → most capable. `auto_route` shifts a task's
 # resolved model along this ladder by the difficulty delta below. Ladder-only: a
-# model not on it (a custom id, or another supplier's) is never auto-shifted.
+# model not on it (a custom deployment name, or another family's) is never
+# auto-shifted.
 _MODEL_LADDER: tuple[str, ...] = (
     "claude-haiku-4-5", "claude-sonnet-5", "claude-opus-4-8", "claude-fable-5",
 )
@@ -55,13 +56,13 @@ _DIFFICULTY_DELTA: dict[str, int] = {"low": -1, "normal": 0, "high": +1}
 
 
 def auto_route(spec: ModelSpec, difficulty: str) -> ModelSpec:
-    """Shift `spec` up/down the Anthropic ladder by difficulty; a no-op otherwise.
+    """Shift `spec` up/down the Claude ladder by difficulty; a no-op otherwise.
 
-    Returns `spec` unchanged for non-Anthropic providers, models off the ladder,
-    unknown difficulties, or when the shift is clamped to the same rung.
+    Returns `spec` unchanged for models off the ladder, unknown difficulties,
+    or when the shift is clamped to the same rung.
     """
     delta = _DIFFICULTY_DELTA.get(difficulty, 0)
-    if delta == 0 or spec.provider != "anthropic" or spec.model not in _MODEL_LADDER:
+    if delta == 0 or spec.model not in _MODEL_LADDER:
         return spec
     idx = _MODEL_LADDER.index(spec.model)
     new_idx = min(max(idx + delta, 0), len(_MODEL_LADDER) - 1)
@@ -94,7 +95,7 @@ class ModelRouter:
 
     def override(self, task: str, task_model: TaskModel) -> ModelSpec:
         """A task's baseline spec with a per-call override layered on (unset fields
-        inherit the baseline). Used to route each OpenHack pass to its own supplier."""
+        inherit the baseline). Used to route each OpenHack pass to its own model."""
         base = self.resolve(task)
         return ModelSpec(
             task_model.provider or base.provider,
@@ -126,7 +127,7 @@ class LLMClient:
         self, task: str, system: str, user: str, schema: dict, *,
         difficulty: str | None = None, spec: ModelSpec | None = None,
     ) -> dict:
-        # An explicit `spec` (e.g. a per-pass supplier override) wins over routing.
+        # An explicit `spec` (e.g. a per-pass model override) wins over routing.
         spec = spec or self.router.resolve(task, difficulty)
         logger.debug("task=%s -> %s/%s (effort=%s, difficulty=%s)",
                      task, spec.provider, spec.model, spec.effort, difficulty or "-")
@@ -134,7 +135,6 @@ class LLMClient:
         req = CompletionRequest(
             model=spec.model, system=system, user=user, schema=schema,
             effort=spec.effort, max_tokens=spec.max_tokens,
-            inference_geo=self.router.cfg.inference_geo,
         )
         return provider.complete_json(req)
 
@@ -143,63 +143,15 @@ class LLMClient:
     ) -> dict[str, dict]:
         """Run many structured-output requests for `task`; return {custom_id: json}.
 
-        Two execution modes, transparent to callers:
-          * default — run concurrently (bounded), isolating per-item failures;
-          * ``ai.batch`` — submit as one Anthropic Message Batch (~50% cost, async).
-
-        In batch mode, items that can't batch (Fable — needs refusal fallbacks the
-        Batches API rejects — or a non-Anthropic supplier) fall back to the
-        synchronous path, as does the whole set if batch submission errors. A
-        failed/absent item is simply omitted from the result (callers skip it).
+        Runs concurrently (bounded by ai.max_concurrency), isolating per-item
+        failures. A failed item is simply omitted from the result (callers skip it).
         """
         items = list(items)
         if not items:
             return {}
-        if self.router.cfg.batch:
-            return self._many_batched(task, items, schema)
-        return self._many_sync(task, items, schema)
-
-    def _many_sync(self, task: str, items: list[BatchItem], schema: dict) -> dict[str, dict]:
         pairs, _failed = resilient_map(
             lambda it: (it.custom_id, self.complete_json(
                 task, it.system, it.user, schema, difficulty=it.difficulty)),
             items, self.max_workers, describe=lambda it: it.custom_id,
         )
         return dict(pairs)
-
-    def _many_batched(self, task: str, items: list[BatchItem], schema: dict) -> dict[str, dict]:
-        results: dict[str, dict] = {}
-        batch: list[tuple[BatchItem, ModelSpec]] = []
-        sync: list[BatchItem] = []
-        for it in items:
-            spec = self.router.resolve(task, it.difficulty)
-            if spec.provider == "anthropic" and not spec.model.startswith(("claude-fable", "claude-mythos")):
-                batch.append((it, spec))
-            else:
-                sync.append(it)   # Fable (needs fallbacks) / other supplier -> sync
-
-        if batch:
-            # custom_id must be [A-Za-z0-9_-]; map safe ids <-> caller keys.
-            id_map = {f"b{i}": it.custom_id for i, (it, _s) in enumerate(batch)}
-            reqs = [
-                (f"b{i}", CompletionRequest(
-                    model=spec.model, system=it.system, user=it.user, schema=schema,
-                    effort=spec.effort, max_tokens=spec.max_tokens,
-                    inference_geo=self.router.cfg.inference_geo))
-                for i, (it, spec) in enumerate(batch)
-            ]
-            try:
-                raw = get_provider("anthropic").complete_json_batch(
-                    reqs,
-                    poll_seconds=self.router.cfg.batch_poll_seconds,
-                    max_wait_seconds=self.router.cfg.batch_max_wait_seconds,
-                )
-                for safe_id, result in raw.items():
-                    results[id_map[safe_id]] = result
-            except Exception as exc:  # noqa: BLE001 - degrade to synchronous
-                logger.error("batch failed (%s); running %d items synchronously", exc, len(batch))
-                sync.extend(it for it, _s in batch)
-
-        if sync:
-            results.update(self._many_sync(task, sync, schema))
-        return results

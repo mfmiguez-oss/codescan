@@ -1,15 +1,24 @@
+# Environment / secrets
 .env
+
+# Python build + tool caches
 *.pyc
 __pycache__/
 *.egg-info/
+build/
+dist/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .venv/
 venv/
-servicenow_import.json
-sn_demo.json
-validation_state.json
-state_demo.json
 node_modules/
-config.overrides.json
+
+# Runtime artifacts (never committed — see CLAUDE.md)
 audit.jsonl
+state.db
+servicenow_import.json
+validation_state.json
 threat_models.json
+config.overrides.json
+.openhack/

@@ -34,7 +34,7 @@ rationale), [RELEASING.md](RELEASING.md) (change and release procedure).
 | Explainability — how inputs become decisions | Composite scoring formula with weights (DESIGN.md §5.6); grounded-facts prompting design (§5.4); feedback-prior delta formula (§5.7a). Every AI judgement ships its *instance* explanation: per-finding rationale, chain narrative/preconditions/ATT&CK mapping, plain-language feedback-adjustment reasons appended to the rationale |
 | Decision-process documentation | DESIGN.md §5.4 (exploitability), §5.6 (scoring), §5.7 (validation proposal rules), §5.7a/b (learning loop), plus the DFDs |
 | End-user documentation | [README](../README.md), the in-app usage guide (Overview tab), and the finding drawer surfacing the "why" behind every score |
-| Model documentation (architecture, training data, performance) | The models are externally hosted; their architecture/training documentation is the providers': [Anthropic model overview](https://docs.claude.com/en/docs/about-claude/models), [OpenAI models](https://platform.openai.com/docs/models), [Gemini models](https://ai.google.dev/gemini-api/docs/models). What codescan owns and documents: which model runs which task (§5.5 routing table, Config tab), and **measured in-context performance** — the calibration report grades each configured model's predictions against analyst outcomes |
+| Model documentation (architecture, training data, performance) | The models are served through Microsoft Foundry; their architecture/training documentation is the vendors': [Anthropic model overview](https://docs.claude.com/en/docs/about-claude/models), [OpenAI models](https://platform.openai.com/docs/models), [Gemini models](https://ai.google.dev/gemini-api/docs/models), [Mistral models](https://docs.mistral.ai/getting-started/models/). What codescan owns and documents: which model runs which task (§5.5 routing table, Config tab), and **measured in-context performance** — the calibration report grades each configured model's predictions against analyst outcomes |
 | Performance expectations and measures | Calibration report (§5.7b): confirm rate by predicted-score bucket, score separation, noisy families; drift alerting thresholds in `calibration:` config |
 | Adversarial robustness (threat model + testing) | [THREATMODEL.md](THREATMODEL.md) (ATLAS-aligned: prompt injection, evasion, feedback poisoning, exfiltration, DoS, excessive agency) with a guarding test per threat in `tests/test_security.py`, run in the offline gate |
 | Framework alignment | [SECURITY_FRAMEWORKS.md](SECURITY_FRAMEWORKS.md) — review against NIST AI RMF, CSA AI Controls Matrix, MITRE ATLAS, OWASP LLM Top-10, IBM GenAI Controls, and Google SAIF |
@@ -89,5 +89,5 @@ Stated explicitly:
   setting the operating org must enable; the procedure assumes it in
   multi-maintainer deployments ([RELEASING.md](RELEASING.md)).
 - **Provider retention** of AI-stage inputs is contractual, not technical —
-  controlled via provider agreements, `ai.inference_geo`, or routing to an
+  controlled via provider agreements, the Azure region of the Foundry resource, or routing to an
   approved deployment (DESIGN.md §8).

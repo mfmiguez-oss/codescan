@@ -79,37 +79,41 @@ chains meaningful (components that actually talk to each other).
 
 The engine defaults to **Claude Opus 4.8** (`config/config.example.yaml → ai.model`).
 Set it to `claude-fable-5` for the hardest chaining analysis — the engine then
-automatically enables server-side refusal fallbacks, because security tooling
+automatically enables client-side refusal fallbacks, because security tooling
 can trip Fable's false-positive classifier refusals.
 
-## Multi-provider AI harness
+## AI models via Microsoft Foundry
 
-Every AI stage goes through a **provider harness** (`providers/`) so tasks can
-run on models from **different suppliers**: `anthropic` (native structured
-outputs, adaptive thinking, effort, Fable fallbacks), `openai` (and any
-OpenAI-compatible endpoint via `OPENAI_BASE_URL`), `google` (Gemini), and
-`foundry` (Microsoft Foundry / Azure AI Foundry deployments). Each supplier
-implements the same `complete_json` contract; non-Anthropic SDKs are optional
-(`pip install -e ".[providers]"`) and imported lazily.
+Every AI stage goes through the **Foundry provider** (`providers/`): all models
+are served by one **Azure AI Foundry** resource, and the model name decides
+which of the resource's two API surfaces a request uses — `claude-*`
+deployments get Anthropic's **native Messages API** (structured outputs,
+adaptive thinking, effort, client-side Fable refusal fallbacks), while any
+other deployment (**OpenAI GPT, Google Gemini, Mistral**, …) goes through the
+resource's **OpenAI-compatible** endpoint with JSON mode + defensive parsing.
+Both SDKs are optional (`pip install -e ".[providers]"`) and imported lazily.
 
-Pick a provider + model per task in config (or the Config tab):
+Pick a model per task in config (or the Config tab) — the model is the
+deployment name on your Foundry resource:
 
 ```yaml
 ai:
-  provider: anthropic          # default tier
-  model: claude-opus-4-8
+  provider: foundry            # the only provider
+  model: claude-opus-4-8       # default tier
   tasks:
-    dedup:          { model: claude-haiku-4-5 }         # lower-cost, Anthropic
-    exploitability: { provider: openai, model: gpt-5 }  # different supplier
-    threat_model:   { provider: google, model: gemini-2.5-pro }
-    enrichment:     { provider: foundry, model: my-deployment }  # Foundry deployment name
+    dedup:          { model: claude-haiku-4-5 }    # lower-cost, mechanical
+    exploitability: { model: gpt-5 }               # different model family
+    threat_model:   { model: gemini-2.5-pro }
+    enrichment:     { model: mistral-large-2411 }
 ```
 
-Credentials come from the environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
-[+ `OPENAI_BASE_URL`], `GEMINI_API_KEY`, `FOUNDRY_API_KEY` +
-`FOUNDRY_BASE_URL` [or their `AZURE_OPENAI_*` equivalents; add
-`FOUNDRY_API_VERSION` for classic Azure OpenAI endpoints]). Adding a supplier
-is a new `LLMProvider` subclass registered in `providers/__init__.py`.
+Credentials come from the environment: `FOUNDRY_API_KEY` plus
+`FOUNDRY_RESOURCE` (the resource name — required for claude-* models, and it
+derives the OpenAI-compatible endpoint for the rest). `FOUNDRY_BASE_URL`
+overrides the derived endpoint, and `FOUNDRY_API_VERSION` selects the classic
+Azure OpenAI dialect; `AZURE_OPENAI_*` equivalents are honored. Adding a
+supplier is a new `LLMProvider` subclass registered in
+`providers/__init__.py`.
 
 ## Model routing by task
 
@@ -176,35 +180,19 @@ The pipeline is I/O-bound on model API calls, and each judgement-heavy stage
   `threat_model` are routable tasks in the Config tab.
 - **Auto-route (adaptive, silent).** Turn on `ai.auto_route` and codescan sizes the
   model to the work *per call*, with no per-task config: each AI request is nudged
-  up or down an Anthropic ladder — **Haiku → Sonnet → Opus → Fable** — from its
+  up or down the Claude ladder — **Haiku → Sonnet → Opus → Fable** — from its
   configured tier by a difficulty signal. A single low-severity finding downgrades
   (cheaper); an actively-exploited (KEV), multi-critical, or large group upgrades
   (stronger reasoning). It moves **relative to** your configured tier (so an
   `exploitability` baseline of Opus becomes Sonnet when trivial, Fable when hot),
-  only shifts Anthropic models that sit on the ladder, and never touches a custom
-  model id or another supplier. Off by default — enabling it is the operator's
-  explicit choice; once on it applies silently. Toggle in the Config tab.
+  only shifts Claude models that sit on the ladder, and never touches a custom
+  deployment name or another model family. Off by default — enabling it is the
+  operator's explicit choice; once on it applies silently. Toggle in the Config tab.
 
   ```yaml
   ai:
     auto_route: true          # silent per-call downgrade/upgrade by difficulty
   ```
-- **Batch API (~50% off, async).** Set `ai.batch` and each AI stage submits its
-  per-service requests through the Anthropic **Message Batches API** — half the
-  token price — instead of live calls. It's **asynchronous**: the scan blocks
-  polling for the batch to finish (up to `ai.batch_max_wait_seconds`, default 1h),
-  so it's for **scheduled/overnight runs**, not interactive triage. Fable (its
-  refusal fallbacks aren't allowed on Batches) and non-Anthropic-routed tasks fall
-  back to the synchronous path automatically, as does the whole set if a batch
-  submission errors — so enabling it never breaks a run.
-
-  ```yaml
-  ai:
-    batch: true               # ~50% cheaper AI stages, asynchronous
-  ```
-
-Concurrency and batch are the two speed/cost ends of the same dial: `max_concurrency`
-minimizes wall-clock at full price; `batch` minimizes price at the cost of latency.
 
 Prompt caching isn't used: the static system prompts are far below the model's
 minimum cacheable-prefix size and each request's payload differs, so a cache
@@ -217,13 +205,12 @@ For security triage, model capability on the **judgement** tasks — exploitabil
 attack chaining, threat modeling, whitebox review — converts directly into
 outcomes: fewer false positives to work and fewer real, multi-step attacks missed.
 So the enterprise profile routes those to **Claude Fable 5** (Anthropic's most
-capable model), keeps mechanical work (dedup, enrichment) on cheap Haiku, and wires
-HA storage, SIEM audit, and data residency. A ready profile ships at
+capable model) on the Foundry resource, keeps mechanical work (dedup, enrichment)
+on cheap Haiku, and wires HA storage and SIEM audit. A ready profile ships at
 [`config/config.enterprise.yaml`](config/config.enterprise.yaml):
 
 ```yaml
 ai:
-  inference_geo: eu            # data residency (Anthropic 1P): pin inference to a region
   tasks:
     dedup:          { model: claude-haiku-4-5 }              # mechanical -> cheap
     exploitability: { model: claude-fable-5, effort: xhigh } # deepest chaining
@@ -235,15 +222,12 @@ codescan already handles Fable's enterprise-specific behaviors:
 
 - **Refusal classifiers.** Security content (exploit narratives, vuln descriptions)
   can trip Fable's false-positive refusal classifier — a real risk for a scanner.
-  The Anthropic provider opts into **server-side fallback to Opus 4.8** in the same
-  call, so a false-positive refusal is transparently re-served rather than failing.
-- **Data retention.** Fable 5 requires **30-day retention** and is rejected (400)
-  under **zero data retention**. If your org runs ZDR, route the Fable tasks to
-  `claude-opus-4-8` instead — codescan surfaces the 400 with exactly that guidance.
-- **Data residency.** `ai.inference_geo` (`us`/`eu`) pins Anthropic inference to a
-  region for compliance.
-- **Batches.** The ~50% Batches API rejects Fable's fallbacks, so `ai.batch` keeps
-  Fable-routed tasks on the synchronous path (they don't take the batch discount).
+  Foundry has no server-side fallback support, so the provider registers the
+  Anthropic SDK's **client-side fallback to Opus 4.8** — a false-positive refusal
+  is transparently re-served rather than failing.
+- **Data retention & residency.** On Foundry these are governed by the platform
+  and the **Azure region of the resource** — pick the region that satisfies your
+  compliance requirements when creating it.
 - **HA & audit.** The profile turns on the shared **SQL state store** and ships the
   **audit log to a SIEM** — see [Deployment & operations](#deployment--operations).
 
@@ -386,7 +370,7 @@ An analyst triage dashboard ships with the tool:
 
 ```bash
 codescan serve                 # http://127.0.0.1:8000 — offline demo, no key needed
-codescan serve --ai            # enable AI exploitability/chaining (needs ANTHROPIC_API_KEY)
+codescan serve --ai            # enable AI exploitability/chaining (needs FOUNDRY_API_KEY)
 codescan serve --live          # scan Bitbucket/Snyk/Xray instead of fixtures
 ```
 
@@ -441,7 +425,7 @@ Backend is FastAPI (`web.py`); the frontend is a single dependency-free HTML pag
 codescan scan --fixtures fixtures --no-ai --offline
 ```
 
-**Full pipeline** with AI exploitability/chaining (needs `ANTHROPIC_API_KEY`):
+**Full pipeline** with AI exploitability/chaining (needs `FOUNDRY_API_KEY` + `FOUNDRY_RESOURCE`):
 
 ```bash
 codescan scan --fixtures fixtures            # AI on, KEV/EPSS enrichment on
@@ -467,7 +451,8 @@ Scan a specific GitHub repo:
 ```bash
 export GITHUB_TOKEN=ghp_...          # repo read access
 export SNYK_TOKEN=… SNYK_ORG_ID=… XRAY_TOKEN=… XRAY_BASE_URL=…   # findings source
-export ANTHROPIC_API_KEY=…           # only if AI stages are enabled
+export FOUNDRY_API_KEY=…             # only if AI stages are enabled
+export FOUNDRY_RESOURCE=…            # the Foundry resource serving the models
 codescan scan --repo acme/checkout   # or several: --repo a/b --repo c/d
 ```
 
@@ -480,11 +465,12 @@ codescan scan --repo acme/checkout   # or several: --repo a/b --repo c/d
 **Whitebox-only scan (no Snyk/Xray account).** To review a repo's *source* with
 the built-in OpenHack AI engine — the way to scan a repo you don't have SCA
 tooling for — add `--whitebox`. It clones the repo and reviews it with the model;
-Snyk/Xray are skipped when uncredentialed, so all you need is an Anthropic key,
+Snyk/Xray are skipped when uncredentialed, so all you need is Foundry credentials,
 a GitHub token (optional for public repos, avoids rate limits), and `git`:
 
 ```bash
-export ANTHROPIC_API_KEY=…            # the whitebox engine is AI-driven
+export FOUNDRY_API_KEY=…              # the whitebox engine is AI-driven
+export FOUNDRY_RESOURCE=…
 export GITHUB_TOKEN=ghp_...           # optional for public repos
 codescan scan --repo mfmiguez-oss/codescan --whitebox --out out.json
 ```
@@ -557,22 +543,23 @@ agreement is a **confidence signal**: a finding seen in every pass is tagged
 in 2 of 2 … passes") is noted on the finding. Set `passes: 1` for a single cheap
 pass; each extra pass is another set of model calls, so it trades cost for recall.
 
-**Different suppliers per pass (stronger independence).** Because different vendors
-have different blind spots, you can route each pass to a **different supplier/model**
-via `openhack.pass_models` — the passes then disagree in useful ways, so the union
-is broader and agreement is more meaningful. A finding confirmed by two different
-suppliers is tagged **`multi-supplier`** (and the note names them), the strongest
-confidence a review can carry. Pass *i* uses `pass_models[i % len]` (cycling), unset
-fields inherit the `openhack` tier, and a pass whose supplier has no key is skipped
-(not fatal), so the union still benefits from the rest:
+**Different models per pass (stronger independence).** Because different model
+families have different blind spots, you can route each pass to a **different
+model** on the Foundry resource via `openhack.pass_models` — the passes then
+disagree in useful ways, so the union is broader and agreement is more
+meaningful. A finding confirmed by two different models is tagged
+**`multi-model`** (and the note names them), the strongest confidence a review
+can carry. Pass *i* uses `pass_models[i % len]` (cycling), unset fields inherit
+the `openhack` tier, and a pass whose model deployment fails is skipped (not
+fatal), so the union still benefits from the rest:
 
 ```yaml
 openhack:
   passes: 3
   pass_models:
-    - { provider: anthropic, model: claude-opus-4-8 }
-    - { provider: openai,    model: gpt-5 }
-    - { provider: google,    model: gemini-2.5-pro }
+    - { model: claude-opus-4-8 }
+    - { model: gpt-5 }
+    - { model: mistral-large-2411 }
 ```
 
 **Auto-run — external OpenHack.** To use a separate OpenHack install instead, set
@@ -609,13 +596,13 @@ Everything is environment-driven (no rebuild to reconfigure):
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `CODESCAN_AI` | `false` | Enable the AI stages (needs `ANTHROPIC_API_KEY`) |
+| `CODESCAN_AI` | `false` | Enable the AI stages (needs `FOUNDRY_API_KEY` + `FOUNDRY_RESOURCE`) |
 | `CODESCAN_LIVE` | `false` | Scan Bitbucket/Snyk/Xray instead of the bundled fixtures (needs creds) |
 | `CODESCAN_PORT` | `8000` | Listen port |
 | `CODESCAN_CONFIG` / `CODESCAN_FIXTURES` | baked-in | Override the config / fixtures paths |
 | `CODESCAN_API_TOKEN` | — | If set, `/api/*` requires this token (defense-in-depth; see below) |
 | `CODESCAN_LOG_LEVEL` | `INFO` | Log verbosity (`DEBUG` adds per-task model routing) |
-| secrets | — | `ANTHROPIC_API_KEY`, `BITBUCKET_*`, `GITHUB_*`, `SNYK_*`, `XRAY_*`, `SERVICENOW_*` (see `.env.example`) |
+| secrets | — | `FOUNDRY_API_KEY`, `FOUNDRY_RESOURCE`, `BITBUCKET_*`, `GITHUB_*`, `SNYK_*`, `XRAY_*`, `SERVICENOW_*` (see `.env.example`) |
 
 For a live, AI-enabled deployment set `CODESCAN_AI=true` and `CODESCAN_LIVE=true`,
 and provide the secrets — `docker run --env-file .env …`, or uncomment
@@ -637,7 +624,7 @@ and provide the secrets — `docker run --env-file .env …`, or uncomment
 | Goal | How |
 |---|---|
 | Evaluate / demo | `docker compose up --build` (offline, no key) — or `codescan serve`. |
-| Try the AI stages | `codescan serve --ai` with `ANTHROPIC_API_KEY` set. |
+| Try the AI stages | `codescan serve --ai` with `FOUNDRY_API_KEY` + `FOUNDRY_RESOURCE` set. |
 | **Production** (live → ServiceNow) | The container with a production preset — see below. |
 
 **Production — recommended.** A ready preset is shipped as
@@ -645,7 +632,7 @@ and provide the secrets — `docker run --env-file .env …`, or uncomment
 .env`, your config mounted, loopback-bound for a proxy in front):
 
 ```bash
-cp .env.example .env                  # ANTHROPIC_API_KEY, GITHUB_*/BITBUCKET_*, SNYK_*, XRAY_*, SERVICENOW_*
+cp .env.example .env                  # FOUNDRY_API_KEY + FOUNDRY_RESOURCE, GITHUB_*/BITBUCKET_*, SNYK_*, XRAY_*, SERVICENOW_*
 cp config/config.example.yaml config/config.yaml   # set servicenow.push: true to POST
 docker compose -f docker-compose.prod.yml up -d --build
 ```
@@ -701,7 +688,7 @@ docker compose -f docker-compose.prod.yml up -d --build
 **Secrets from HashiCorp Vault (built-in).** codescan can pull secrets straight
 from Vault. Install the extra (`pip install 'codescan[vault]'`) and enable it in
 config — at load, the listed KV secrets are fetched and injected into the
-environment *before* interpolation, so every `${…}` token (and `ANTHROPIC_API_KEY`)
+environment *before* interpolation, so every `${…}` token (and `FOUNDRY_API_KEY`)
 resolves from Vault with no other change:
 
 ```yaml

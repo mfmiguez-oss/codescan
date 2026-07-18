@@ -1,14 +1,12 @@
-"""Multi-provider LLM harness — provider-agnostic interface.
+"""LLM provider harness — provider-agnostic interface.
 
 codescan's AI stages (semantic dedup, exploitability, threat modeling, AI
-enrichment) go through an `LLMProvider`. Each supplier — Anthropic, OpenAI (and
-any OpenAI-compatible endpoint), Google, Microsoft Foundry — implements the
-same `complete_json(request) -> dict` contract, so a task can be routed to any
-model from any supplier via config (see `llm.py` / `ModelRouter`).
-
-The Anthropic provider uses native structured outputs; other providers request
-JSON and parse defensively (`extract_json`), which keeps the adapters robust
-across the frequent API changes on those platforms.
+enrichment) go through an `LLMProvider` implementing the same
+`complete_json(request) -> dict` contract, so a task can be routed to any
+configured model via config (see `llm.py` / `ModelRouter`). Models are served
+through Microsoft Foundry: claude-* deployments use native structured outputs;
+other deployments request JSON and parse defensively (`extract_json`), which
+keeps the adapter robust across the frequent API changes on those platforms.
 """
 
 from __future__ import annotations
@@ -26,28 +24,13 @@ class CompletionRequest:
     schema: dict
     effort: str = "high"
     max_tokens: int = 16000
-    inference_geo: str = ""        # data residency (Anthropic first-party), e.g. "us" / "eu"
 
 
 class LLMProvider:
     name = "base"
-    supports_batch = False
 
     def complete_json(self, req: CompletionRequest) -> dict:  # pragma: no cover - interface
         raise NotImplementedError
-
-    def complete_json_batch(
-        self,
-        requests: list[tuple[str, CompletionRequest]],
-        *,
-        poll_seconds: int = 30,
-        max_wait_seconds: int = 3600,
-    ) -> dict[str, dict]:  # pragma: no cover - interface
-        """Run many requests as one async batch; return {custom_id: parsed_json}.
-
-        Only providers with `supports_batch = True` implement this.
-        """
-        raise NotImplementedError(f"{self.name} provider has no Batches API support")
 
 
 def build_json_instruction(req: CompletionRequest) -> str:

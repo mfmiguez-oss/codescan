@@ -91,10 +91,17 @@ def _dotted_keys(d: dict, prefix: str = "") -> list[str]:
             out.append(path)
     return out
 
-# Surfaced to the config UI for dropdowns.
+# Surfaced to the config UI for dropdowns. Preferred model deployments on
+# Microsoft Foundry, by family; any other deployment name can be typed freely.
 KNOWN_MODELS = [
-    "claude-fable-5", "claude-opus-4-8", "claude-opus-4-7",
-    "claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-4-5",
+    # Anthropic
+    "claude-fable-5", "claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5",
+    # OpenAI
+    "gpt-5", "gpt-5-mini",
+    # Google
+    "gemini-2.5-pro", "gemini-2.5-flash",
+    # Mistral
+    "mistral-large-2411", "mistral-medium-2505",
 ]
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 ROUTED_TASKS = ["dedup", "exploitability", "enrichment", "threat_model", "openhack"]
@@ -128,7 +135,6 @@ def sanitized_config(cfg: Config) -> dict:
             "max_tokens": cfg.ai.max_tokens,
             "max_concurrency": cfg.ai.max_concurrency,
             "auto_route": cfg.ai.auto_route,
-            "batch": cfg.ai.batch,
             "tasks": {
                 name: {
                     "provider": (t.provider or ""),
@@ -217,8 +223,6 @@ def apply_config(cfg: Config, update: dict) -> None:
         cfg.ai.max_concurrency = max(1, int(ai["max_concurrency"]))
     if "auto_route" in ai:
         cfg.ai.auto_route = bool(ai["auto_route"])
-    if "batch" in ai:
-        cfg.ai.batch = bool(ai["batch"])
     if "tasks" in ai:
         for name, t in ai["tasks"].items():
             spec = TaskModel(
@@ -313,6 +317,27 @@ def _valid_provider(v: str) -> str:
     return v
 
 
+# Supplier names persisted by pre-Foundry versions in config.overrides.json.
+_LEGACY_PROVIDERS = {"anthropic", "openai", "google"}
+
+
+def migrate_overrides(update: dict) -> dict:
+    """Forward-migrate persisted UI overrides from the multi-provider era.
+
+    All models are now served through Foundry, so a legacy supplier name
+    collapses to "foundry" (the stored model names carry over unchanged).
+    Applied only when loading config.overrides.json — live POSTs still reject
+    unknown providers.
+    """
+    ai = update.get("ai", {})
+    if ai.get("provider") in _LEGACY_PROVIDERS:
+        ai["provider"] = "foundry"
+    for task in ai.get("tasks", {}).values():
+        if isinstance(task, dict) and task.get("provider") in _LEGACY_PROVIDERS:
+            task["provider"] = "foundry"
+    return update
+
+
 def _deep_merge(base: dict, update: dict) -> dict:
     for k, v in update.items():
         if isinstance(v, dict) and isinstance(base.get(k), dict):
@@ -387,7 +412,8 @@ class AppState:
         self.overrides_path = Path(overrides_path) if overrides_path else None
         # Layer any UI-saved overrides on top of the base config.
         if self.overrides_path and self.overrides_path.exists():
-            apply_config(self.cfg, json.loads(self.overrides_path.read_text(encoding="utf-8")))
+            saved = json.loads(self.overrides_path.read_text(encoding="utf-8"))
+            apply_config(self.cfg, migrate_overrides(saved))
         self.audit = AuditLog(self.cfg.audit, base_dir=Path(out_path).parent)
         self.result: PipelineResult = PipelineResult()
         self.startup_error: str | None = None

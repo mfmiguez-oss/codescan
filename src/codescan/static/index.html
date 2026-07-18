@@ -689,27 +689,27 @@ function renderConfig() {
     return `<div class="grid5" style="margin:6px 0">
       <div style="font-weight:600">${t}</div>
       ${sel(`task-${t}-provider`, P, tc.provider || '', '(inherit)')}
-      <input type="text" id="task-${t}-model" value="${esc(tc.model || '')}" placeholder="(default)"/>
+      <input type="text" id="task-${t}-model" list="known-models" value="${esc(tc.model || '')}" placeholder="(default)"/>
       ${sel(`task-${t}-effort`, E, tc.effort || '', '(inherit)')}
       <input type="number" id="task-${t}-max" value="${tc.max_tokens ?? ''}" placeholder="inherit"/>
     </div>`;
   }).join('');
 
   $('#configView').innerHTML = `
+    <datalist id="known-models">${M.map(m => `<option value="${esc(m)}"></option>`).join('')}</datalist>
     <div class="card">
       <h4>AI — default tier</h4>
-      <p class="hint">Used by any AI task without a specific route below. Provider + model can come from any supplier (Anthropic / OpenAI / Google).</p>
+      <p class="hint">Used by any AI task without a specific route below. All models are served through <strong>Microsoft Foundry</strong> — pick a preferred Anthropic / OpenAI / Google / Mistral model, or type any deployment name on your Foundry resource.</p>
       <div class="formrow"><label>Provider</label>${sel('ai-provider', P, c.ai.provider)}</div>
-      <div class="formrow"><label>Model</label><input type="text" id="ai-model" style="width:260px" value="${esc(c.ai.model)}"/></div>
+      <div class="formrow"><label>Model</label><input type="text" id="ai-model" list="known-models" style="width:260px" value="${esc(c.ai.model)}"/></div>
       <div class="formrow"><label>Effort</label>${sel('ai-effort', E, c.ai.effort)}</div>
       <div class="formrow"><label>Max tokens</label><input type="number" id="ai-max" value="${c.ai.max_tokens}"/></div>
       <div class="formrow"><label>Max concurrency</label><input type="number" id="ai-conc" style="width:100px" value="${c.ai.max_concurrency ?? 4}"/> <span class="muted" style="font-size:12px">parallel per-service AI calls (latency only)</span></div>
       <div class="formrow"><label>Auto-route models</label><input type="checkbox" id="ai-auto" ${c.ai.auto_route ? 'checked' : ''}/> <span class="muted" style="font-size:12px">silently pick cheaper/stronger tier per call by difficulty (Haiku↔Sonnet↔Opus↔Fable)</span></div>
-      <div class="formrow"><label>Batch API</label><input type="checkbox" id="ai-batch" ${c.ai.batch ? 'checked' : ''}/> <span class="muted" style="font-size:12px">Anthropic Batches API — ~50% cheaper, asynchronous (for scheduled runs)</span></div>
     </div>
     <div class="card">
       <h4>Model routing by task</h4>
-      <p class="hint">Route each task to any provider + model. Lower-cost models for mechanical work (dedup, enrichment), deep models for reasoning (exploitability, threat_model). Blank inherits the default tier. Effort applies to Anthropic; other providers ignore it.</p>
+      <p class="hint">Route each task to any Foundry model deployment. Lower-cost models for mechanical work (dedup, enrichment), deep models for reasoning (exploitability, threat_model). Blank inherits the default tier. Effort applies to Claude models; other families ignore it.</p>
       <div class="grid5"><div class="h">Task</div><div class="h">Provider</div><div class="h">Model</div><div class="h">Effort</div><div class="h">Max tokens</div></div>
       ${tasksHtml}
     </div>
@@ -790,7 +790,7 @@ async function saveConfig() {
     tasks[t] = { provider: $('#task-' + t + '-provider').value, model: $('#task-' + t + '-model').value, effort: $('#task-' + t + '-effort').value, max_tokens: numOrNull('task-' + t + '-max') };
   });
   const update = {
-    ai: { provider: $('#ai-provider').value, model: $('#ai-model').value, effort: $('#ai-effort').value, max_tokens: Number($('#ai-max').value), max_concurrency: Number($('#ai-conc').value), auto_route: $('#ai-auto').checked, batch: $('#ai-batch').checked, tasks },
+    ai: { provider: $('#ai-provider').value, model: $('#ai-model').value, effort: $('#ai-effort').value, max_tokens: Number($('#ai-max').value), max_concurrency: Number($('#ai-conc').value), auto_route: $('#ai-auto').checked, tasks },
     enrichment: { kev_enabled: $('#en-kev').checked, epss_enabled: $('#en-epss').checked, reachability_enabled: $('#en-reach').checked, ai_enabled: $('#en-ai').checked },
     threat_model: { enabled: $('#tm-enabled').checked },
     feedback: { enabled: $('#fb-enabled').checked, prompt_history: $('#fb-prompt-history').checked },

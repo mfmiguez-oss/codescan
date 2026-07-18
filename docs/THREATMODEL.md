@@ -98,8 +98,8 @@ signals — **not source code**). The one exception, the OpenHack whitebox engin
 sends selected first-party source and is **off unless `openhack.auto`** and
 bounded by `max_files` / `max_file_bytes`. Per-boundary data-out is enumerated in
 [DATAFLOW.md](DATAFLOW.md) §3. Stricter deployments run `--no-ai`, disable
-OpenHack, or route to an approved model deployment; `ai.inference_geo` selects
-data residency.
+OpenHack, or route to an approved model deployment; the Azure region of the
+Foundry resource selects data residency.
 
 **Residual.** Contractual (provider retention) rather than technical — stated in
 GOVERNANCE.md residuals.

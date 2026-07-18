@@ -1,33 +1,31 @@
-# codescan — enterprise profile tuned for Claude Fable 5.
+# codescan — enterprise profile tuned for Claude Fable 5 on Microsoft Foundry.
 #
 # Rationale: in security triage, model capability on the *judgement* tasks
 # (exploitability, attack chaining, threat modeling, whitebox review) translates
 # directly into outcomes — fewer false positives to triage and fewer real,
 # multi-step attacks missed. So the deep tasks route to Fable 5 (Anthropic's most
-# capable model) while mechanical work stays on cheap Haiku. HA storage, SIEM
-# audit shipping, and data residency are wired for an enterprise deployment.
+# capable model) while mechanical work stays on cheap Haiku. All models are
+# served through one Foundry resource (FOUNDRY_API_KEY + FOUNDRY_RESOURCE);
+# data residency follows the Azure region of that resource. HA storage and SIEM
+# audit shipping are wired for an enterprise deployment.
 #
 # Fable 5 caveats this profile accounts for:
 #   * Refusal classifiers — security content can trip false-positive refusals; the
-#     Anthropic provider opts into server-side fallback to Opus 4.8 automatically.
-#   * Data retention — Fable 5 requires 30-day retention and 400s under zero data
-#     retention (ZDR). If your org is ZDR, switch the fable-routed tasks below to
-#     claude-opus-4-8. codescan surfaces the 400 with this guidance.
-#   * Batches — the ~50% Batches API rejects Fable's fallbacks, so `ai.batch` keeps
-#     Fable tasks on the synchronous path (they don't get the batch discount).
+#     provider registers the client-side fallback to Opus 4.8 automatically
+#     (Foundry has no server-side fallback support).
+#   * Data retention — Fable 5's retention requirements on Foundry are set by the
+#     platform. If a Fable request is rejected, switch the fable-routed tasks
+#     below to claude-opus-4-8.
 #   * Cost — Fable is above Opus-tier; this trades cost for accuracy on the tasks
 #     where it matters. Dedup/enrichment stay on Haiku.
 
 ai:
-  provider: anthropic
+  provider: foundry
   model: claude-opus-4-8        # default tier for any unrouted task
   effort: high
   max_tokens: 32000
   max_concurrency: 8           # larger estates: more per-service calls in flight
   auto_route: false            # deterministic tiers — auditable routing for enterprise
-  batch: false                 # interactive triage; Fable can't use Batches anyway
-  # Data residency (Anthropic first-party). Set to your region for compliance.
-  inference_geo: ""            # e.g. "us" or "eu"
   tasks:
     dedup:          { model: claude-haiku-4-5, max_tokens: 8000 }   # mechanical -> cheap
     enrichment:     { model: claude-haiku-4-5 }                     # mechanical -> cheap
@@ -56,10 +54,10 @@ openhack:
   clone: true
   workspace: .openhack
   passes: 2                    # union for recall + cross-pass agreement
-  # For maximum independence, run the passes on different suppliers (Fable primary):
+  # For maximum independence, run the passes on different models (Fable primary):
   pass_models:
-    - { provider: anthropic, model: claude-fable-5 }
-    - { provider: anthropic, model: claude-opus-4-8 }
+    - { model: claude-fable-5 }
+    - { model: claude-opus-4-8 }
   min_confidence: low
 
 threat_model:

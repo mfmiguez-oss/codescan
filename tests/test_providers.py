@@ -1,4 +1,4 @@
-"""Multi-provider harness tests — registry, dispatch, JSON parsing. No network."""
+"""Provider harness tests — registry, dispatch, JSON parsing. No network."""
 
 from __future__ import annotations
 
@@ -8,18 +8,14 @@ import codescan.llm as llm_mod
 from codescan.config import AIConfig, TaskModel
 from codescan.llm import LLMClient, ModelRouter
 from codescan.providers import PROVIDERS, get_provider
-from codescan.providers.anthropic_provider import AnthropicProvider
 from codescan.providers.base import CompletionRequest, build_json_instruction, extract_json
-from codescan.providers.google_provider import GoogleProvider
-from codescan.providers.openai_provider import OpenAIProvider
+from codescan.providers.foundry_provider import FoundryProvider
 
 
-def test_registry_resolves_suppliers():
-    assert set(PROVIDERS) == {"anthropic", "openai", "google", "foundry"}
-    assert isinstance(get_provider("anthropic"), AnthropicProvider)
-    assert isinstance(get_provider("openai"), OpenAIProvider)
-    assert isinstance(get_provider("google"), GoogleProvider)
-    assert get_provider("anthropic") is get_provider("anthropic")   # cached
+def test_registry_resolves_foundry():
+    assert PROVIDERS == ["foundry"]
+    assert isinstance(get_provider("foundry"), FoundryProvider)
+    assert get_provider("foundry") is get_provider("foundry")   # cached
     with pytest.raises(RuntimeError):
         get_provider("acme")
 
@@ -34,7 +30,7 @@ def test_extract_json_variants():
 
 def test_build_json_instruction_includes_schema():
     req = CompletionRequest(
-        model="gpt-4.1",
+        model="gpt-5",
         system="system prompt",
         user="user prompt",
         schema={"type": "object", "properties": {"ok": {"type": "boolean"}}},
@@ -61,10 +57,10 @@ def test_llmclient_dispatches_to_routed_provider(monkeypatch):
     monkeypatch.setattr(llm_mod, "get_provider", fake_get_provider)
 
     cfg = AIConfig(tasks={
-        "exploitability": TaskModel(provider="openai", model="gpt-5", effort="high", max_tokens=1234),
+        "exploitability": TaskModel(model="gpt-5", effort="high", max_tokens=1234),
     })
     client = LLMClient(ModelRouter(cfg))
     out = client.complete_json("exploitability", "sys", "user", {"type": "object"})
 
     assert out == {"ok": True}
-    assert captured == {"provider": "openai", "model": "gpt-5", "effort": "high", "max_tokens": 1234}
+    assert captured == {"provider": "foundry", "model": "gpt-5", "effort": "high", "max_tokens": 1234}

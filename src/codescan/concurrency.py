@@ -27,15 +27,6 @@ T = TypeVar("T")
 R = TypeVar("R")
 
 
-def workers_of(llm: object) -> int:
-    """Concurrency bound from an LLM client, defaulting to sequential.
-
-    Reads `llm.max_workers` when present; a minimal client (or a test double)
-    that only implements `complete_json` runs sequentially.
-    """
-    return max(1, int(getattr(llm, "max_workers", 1)))
-
-
 def map_workers(fn: Callable[[T], R], items: Iterable[T], max_workers: int) -> list[R]:
     """Apply `fn` to each item, up to `max_workers` in parallel, order preserved.
 

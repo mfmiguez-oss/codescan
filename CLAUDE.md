@@ -11,7 +11,8 @@ Xray (and a built-in OpenHack whitebox engine) over a Bitbucket/GitHub repo
 inventory → dedup → enrich (KEV/EPSS/reachability) → AI exploitability + attack
 chains → composite score → validation states → ServiceNow export, with an
 analyst web UI. It is an **LLM application over hosted models** (Anthropic /
-OpenAI / Google via a provider harness) — not a trained model.
+OpenAI / Google / Mistral model deployments, all served through Microsoft
+Foundry) — not a trained model.
 
 ## The gate — run before every commit
 
@@ -67,7 +68,7 @@ All gitignored — clean any strays before committing: `audit.jsonl`, `state.db`
 ```bash
 codescan serve                                   # offline demo UI (no creds) — http://127.0.0.1:8000
 codescan scan --fixtures fixtures --no-ai --offline   # offline CLI demo
-codescan scan --repo owner/name --whitebox       # whitebox source review (needs ANTHROPIC_API_KEY + git)
+codescan scan --repo owner/name --whitebox       # whitebox source review (needs FOUNDRY_API_KEY + git)
 ```
 
 For UI changes (`static/index.html`), verify in a browser against the running
@@ -78,8 +79,9 @@ machine path).
 
 ## LLM / provider code
 
-codescan targets hosted models via `providers/` + `llm.py`. When touching model
-routing, provider adapters, model IDs, or prompt/token behavior, consult the
+codescan accesses all models through Microsoft Foundry via `providers/` +
+`llm.py`. When touching model routing, the provider, model IDs, or
+prompt/token behavior, consult the
 `claude-api` reference — default to the latest Claude models. Model output is
 always schema-constrained and treated as **data, never instructions** (see
 `exploitability._apply` and `docs/THREATMODEL.md`).

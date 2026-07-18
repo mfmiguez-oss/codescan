@@ -336,17 +336,36 @@ def test_openhack_config(tmp_path):
 def test_ai_provider_config(tmp_path):
     client = _client(tmp_path)
     body = client.get("/api/config").json()
-    assert body["ai"]["provider"] == "anthropic"
-    assert body["options"]["ai_providers"] == ["anthropic", "openai", "google", "foundry"]
+    assert body["ai"]["provider"] == "foundry"
+    assert body["options"]["ai_providers"] == ["foundry"]
+    # The curated model list spans the four preferred families.
+    known = body["options"]["known_models"]
+    for model in ("claude-opus-4-8", "gpt-5", "gemini-2.5-pro", "mistral-large-2411"):
+        assert model in known
 
     updated = client.post("/api/config", json={
-        "ai": {"provider": "openai", "model": "gpt-5",
-               "tasks": {"exploitability": {"provider": "google", "model": "gemini-2.5-pro"}}},
+        "ai": {"model": "gpt-5",
+               "tasks": {"exploitability": {"model": "gemini-2.5-pro"}}},
     }).json()
-    assert updated["ai"]["provider"] == "openai" and updated["ai"]["model"] == "gpt-5"
-    assert updated["ai"]["tasks"]["exploitability"]["provider"] == "google"
+    assert updated["ai"]["provider"] == "foundry" and updated["ai"]["model"] == "gpt-5"
+    assert updated["ai"]["tasks"]["exploitability"]["model"] == "gemini-2.5-pro"
     # Unknown provider rejected.
     assert client.post("/api/config", json={"ai": {"provider": "acme"}}).status_code == 400
+
+
+def test_legacy_overrides_migrate_to_foundry(tmp_path):
+    # Overrides persisted by a pre-Foundry version must not break startup —
+    # legacy supplier names collapse to "foundry", models carry over.
+    (tmp_path / "overrides.json").write_text(
+        '{"ai": {"provider": "anthropic", "model": "claude-opus-4-8",'
+        ' "tasks": {"exploitability": {"provider": "openai", "model": "gpt-5"}}}}',
+        encoding="utf-8",
+    )
+    body = _client(tmp_path).get("/api/config").json()
+    assert body["ai"]["provider"] == "foundry"
+    assert body["ai"]["model"] == "claude-opus-4-8"
+    assert body["ai"]["tasks"]["exploitability"]["provider"] == "foundry"
+    assert body["ai"]["tasks"]["exploitability"]["model"] == "gpt-5"
 
 
 def test_servicenow_format_config(tmp_path):

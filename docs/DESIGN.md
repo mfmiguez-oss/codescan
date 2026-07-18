@@ -53,7 +53,7 @@ ServiceNow-ready records — with an analyst UI on top.
 | Validation states | `validation.py` + `models.py` — lifecycle + persistent state store + VR state mapping. |
 | Deduplication | `dedup.py` (deterministic) + `dedup_ai.py` (semantic, lower-cost tier). |
 | Exploitability incl. chaining, scored | `exploitability.py` (LLM) + `enrich/` (KEV/EPSS/reachability) + `scoring.py`. |
-| AI tooling | `llm.py` — task→model router over the Anthropic SDK. |
+| AI tooling | `llm.py` — task→model router over the Microsoft Foundry provider. |
 
 ---
 
@@ -104,7 +104,7 @@ ServiceNow-ready output on its own.
 | Connectors | `connectors/`, `openhack_engine.py`, `openhack_runner.py` | Talk to external systems; emit/consume raw scanner shapes; in-process whitebox review. |
 | Domain model | `models.py` | Canonical `Finding`, fingerprinting, state enums, difficulty signals. |
 | Processing | `dedup*.py`, `enrich/`, `exploitability.py`, `scoring.py`, `validation.py`, `feedback.py`, `calibration.py`, `threatmodel.py` | Transform findings; calibrate from feedback; grade score calibration; synthesize threat models. |
-| AI infrastructure | `llm.py`, `providers/`, `concurrency.py` | Model routing (+ auto-route), multi-provider client, bounded parallelism. |
+| AI infrastructure | `llm.py`, `providers/`, `concurrency.py` | Model routing (+ auto-route), Foundry model gateway, bounded parallelism. |
 | Cross-cutting | `logging_setup.py`, `audit.py`, `vault.py` | Observability, append-only audit log, secret sourcing. |
 | Orchestration | `pipeline.py` | Wire stages together; two ingest modes. |
 | Interfaces | `cli.py`, `web.py`, `static/` | CLI, HTTP API, dashboard. |
@@ -196,12 +196,12 @@ and recording cross-pass agreement: a finding seen in every pass is tagged
 `corroborated`, one seen once `single-pass`, with an "identified in N of M passes"
 note — a confidence signal that survives to the `Finding`.
 
-**Different suppliers per pass.** `openhack.pass_models` routes each pass to its own
-supplier/model (pass *i* → `pass_models[i % len]`, unset fields inheriting the
+**Different models per pass.** `openhack.pass_models` routes each pass to its own
+model (pass *i* → `pass_models[i % len]`, unset fields inheriting the
 `openhack` tier, via `LLMClient.resolve_spec` / `ModelRouter.override`). Different
-vendors have different blind spots, so diverse passes make the union broader and the
-agreement more meaningful — a finding confirmed by ≥2 suppliers earns a
-`multi-supplier` tag. Each pass is isolated: a supplier without a configured key is
+model families have different blind spots, so diverse passes make the union broader
+and the agreement more meaningful — a finding confirmed by ≥2 models earns a
+`multi-model` tag. Each pass is isolated: a failing model deployment is
 logged and skipped, and the union still benefits from the passes that ran. Fixtures
 under `fixtures/` drive the default UI and the test suite.
 
@@ -221,7 +221,7 @@ credentials are present: a connector exposes `configured`, and `_ingest_live`
 skips (logs, does not error) any source that isn't set up. This lets a scan run
 on whichever sources are wired up — in particular a **whitebox-only** scan
 (`scan --whitebox`) that enumerates a GitHub repo and reviews its source with the
-built-in OpenHack engine (`openhack_engine.py`), needing only an Anthropic key, a GitHub token,
+built-in OpenHack engine (`openhack_engine.py`), needing only Foundry credentials, a GitHub token,
 and `git` — no Snyk/Xray account. GitHub's `api_url` defaults to `api.github.com`
 when unset (a `GitHubConfig` validator), so a github.com scan needs no extra URL.
 
@@ -301,18 +301,21 @@ Design points:
   decisions on a chain survive rescans even though model-assigned chain ids
   don't (§5.7).
 
-### 5.5 Model routing + multi-provider harness (`llm.py`, `providers/`)
+### 5.5 Model routing + Foundry provider (`llm.py`, `providers/`)
 
-Every AI stage runs through a **provider harness** (`providers/`): each supplier
-— `anthropic` (native structured outputs, adaptive thinking, effort, Fable
-fallbacks), `openai` (and any OpenAI-compatible endpoint via `OPENAI_BASE_URL`),
-`google` (Gemini), `foundry` (Microsoft Foundry / Azure AI Foundry deployments
-via `FOUNDRY_BASE_URL` + `FOUNDRY_API_KEY`, with `FOUNDRY_API_VERSION` for
-classic Azure OpenAI endpoints) — implements the same
-`complete_json(request) -> dict` contract. Non-Anthropic SDKs are imported lazily, so they're optional deps.
-`ModelRouter` resolves a task to a `ModelSpec(provider, model, effort,
-max_tokens)`, and `LLMClient` dispatches to the resolved supplier via the
-registry — so a task can run on any model from any supplier, set in config.
+Every AI stage runs through the **Foundry provider** (`providers/`): all models
+are served by one Microsoft **Azure AI Foundry** resource (`FOUNDRY_API_KEY` +
+`FOUNDRY_RESOURCE`, or `FOUNDRY_BASE_URL` / `AZURE_OPENAI_*`; add
+`FOUNDRY_API_VERSION` for classic Azure OpenAI endpoints). The model name picks
+the API surface: `claude-*` deployments use Anthropic's **native Messages API**
+on the resource (structured outputs, adaptive thinking, effort, client-side
+Fable refusal fallbacks), while any other deployment — OpenAI GPT, Google
+Gemini, Mistral, … — uses the resource's **OpenAI-compatible** endpoint (JSON
+mode + defensive parsing). Both paths implement the same
+`complete_json(request) -> dict` contract; SDKs are imported lazily, so they're
+optional deps. `ModelRouter` resolves a task to a `ModelSpec(provider, model,
+effort, max_tokens)`, and `LLMClient` dispatches through the registry — so a
+task can run on any model deployment, set in config.
 Different tasks need different intelligence tiers:
 
 | Task | Default tier | Rationale |
@@ -322,52 +325,42 @@ Different tasks need different intelligence tiers:
 | `threat_model` / `openhack` | default tier (`ai.model`) | Deep reasoning; route to Sonnet for cost. |
 | *(anything else)* | default tier (`ai.model`) | Fallback. |
 
-`LLMClient` adapts each request to the model's capabilities so callers never
+The provider adapts each request to the model's capabilities so callers never
 have to: it omits `effort`/adaptive-thinking for models that don't support them
-(Haiku), and enables server-side **refusal fallbacks** for Fable/Mythos (security
-tooling can trip false-positive classifier refusals; the request transparently
-re-serves on Opus 4.8 in the same call). Config `ai.tasks.<name>` overrides any
-field per task. Adding a new AI stage is a one-liner: name a task, optionally
-give it a built-in tier.
+(Haiku), and registers the Anthropic SDK's client-side **refusal fallback** for
+Fable/Mythos (security tooling can trip false-positive classifier refusals; the
+request transparently re-serves on Opus 4.8 — Foundry has no server-side
+fallback support). Config `ai.tasks.<name>` overrides any field per task.
+Adding a new AI stage is a one-liner: name a task, optionally give it a
+built-in tier.
 
 **Enterprise / Fable 5.** For security triage, capability on the judgement tasks
 (exploitability, chaining, threat modeling, whitebox review) converts to outcomes,
 so the enterprise profile (`config/config.enterprise.yaml`) routes those to Fable 5
 and keeps mechanical work on Haiku. codescan handles Fable's enterprise behaviors:
-the refusal fallback above; **data residency** (`ai.inference_geo`, e.g. `us`/`eu`,
-threaded onto Anthropic first-party requests); and Fable's **30-day data-retention
-requirement** — under zero data retention Anthropic rejects Fable with a 400, which
-the provider re-raises with actionable guidance (route to Opus 4.8). Fable also
-can't use the Batches API (its fallbacks are rejected), so batch mode keeps Fable
-tasks synchronous.
+the refusal fallback above, with data residency and retention governed by the
+Azure region and policy of the Foundry resource; a rejected Fable request
+surfaces with actionable guidance (route to Opus 4.8).
 
 **Silent adaptive routing (`ai.auto_route`).** Off by default. When enabled, each
-AI call is nudged up or down an Anthropic capability ladder —
+AI call is nudged up or down the Claude capability ladder —
 **Haiku → Sonnet → Opus → Fable** — *relative to* its configured tier, by a
 difficulty signal the calling stage computes (`group_difficulty` /
 `size_difficulty` in `models.py`): a single low-severity finding downgrades
 (cheaper), while an actively-exploited (KEV), multi-critical, or large group
-upgrades (stronger reasoning). It only shifts Anthropic models that sit on the
-ladder — a custom model id or another supplier is left exactly as configured — and
-clamps at both ends. Enabling it is the operator's explicit opt-in; thereafter it
-applies silently per call (`auto_route` in `llm.py`).
+upgrades (stronger reasoning). It only shifts Claude models that sit on the
+ladder — a custom deployment name or another model family is left exactly as
+configured — and clamps at both ends. Enabling it is the operator's explicit
+opt-in; thereafter it applies silently per call (`auto_route` in `llm.py`).
 
 **Fan-out (`complete_json_many`).** The judgement-heavy stages (exploitability,
 threat modeling, AI enrichment, semantic dedup) each build one request per
 repo/service and hand the list to `LLMClient.complete_json_many`, which owns the
-fan-out and returns `{custom_id: result}`. Centralizing this keeps the stages
-declarative and gives one place to choose the execution strategy:
-
-- **Bounded concurrency (`ai.max_concurrency`, default 4, the default).** Runs the
-  requests through `resilient_map` (`concurrency.py`) — up to N at once, per-item
-  failures isolated (logged and skipped), results applied in deterministic order.
-  Latency-only: same requests, same cost, bounded to respect rate limits.
-- **Message Batches (`ai.batch`).** Submits the requests as one Anthropic batch
-  (`AnthropicProvider.complete_json_batch`) at **~50% token cost**. Asynchronous —
-  the pipeline polls up to `batch_max_wait_seconds` — so it's for scheduled runs,
-  not interactive. Fable (its refusal fallbacks are rejected on Batches) and
-  non-Anthropic-routed requests fall back to the concurrent path, as does the whole
-  set if submission errors, so enabling batch never fails a run.
+fan-out and returns `{custom_id: result}`: bounded concurrency
+(`ai.max_concurrency`, default 4) through `resilient_map` (`concurrency.py`) —
+up to N at once, per-item failures isolated (logged and skipped), results
+applied in deterministic order. Latency-only: same requests, same cost, bounded
+to respect rate limits.
 
 **No prompt caching (deliberate).** The static system prompts sit far below the
 model's minimum cacheable-prefix size and each request's payload differs, so a
@@ -699,7 +692,7 @@ Considerations:
   existing env wins unless `override_env`. Vault's own bootstrap creds come from the
   environment.
 - **Refusal handling.** Security content can trip an LLM's safety classifiers.
-  On Fable/Mythos the client opts into server-side fallbacks so a false-positive
+  On Fable/Mythos the client registers client-side fallbacks so a false-positive
   refusal is transparently re-served rather than failing the run; a genuine
   refusal surfaces as an error and the deterministic score still stands.
 - **Least privilege.** Bitbucket needs read; ServiceNow needs write to the
@@ -761,8 +754,7 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   not by total finding count — a repo with 500 findings is one exploitability
   call, not 500. Lower-cost routing keeps the mechanical calls inexpensive.
 - **Horizontal scale** path: the per-service AI calls are embarrassingly parallel
-  — run concurrently (`ai.max_concurrency`) for latency, or via the Message
-  Batches API (`ai.batch`) for ~50% cost on scheduled runs (§5.5).
+  — run concurrently (`ai.max_concurrency`) to cut wall-clock time (§5.5).
 - **Shared state for HA:** the validation-state store is pluggable
   (`storage.backend`) — the DB-backed `SqlStateStore` (Postgres/SQLite) lets
   multiple replicas / scheduled runners share one durable, concurrency-safe store
@@ -790,8 +782,7 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   environment). The durable triage state can be shared via the SQL backend above;
   the in-memory result is re-derived by scanning.
 - **AI cost/latency.** Per-service calls run with bounded parallelism
-  (`ai.max_concurrency`) or, for ~50% cost on scheduled runs, the Message Batches
-  API (`ai.batch`) — both via `complete_json_many` (§5.5). A shared prompt-cache
+  (`ai.max_concurrency`) via `complete_json_many` (§5.5). A shared prompt-cache
   layer isn't warranted (prompts are below the min cacheable prefix).
 - **ServiceNow field mapping** targets a generic `sn_vul_vulnerable_item` import;
   it must be aligned to each deployment's VR transform map.
@@ -849,9 +840,9 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   (precision + separation checks, evidence gate, disabled/healthy silence);
   endpoint coverage in `test_web.py`, and the scan-time `calibration.drift`
   audit event in `test_pipeline.py`.
-- **Enterprise / Fable 5** (`tests/test_enterprise.py`) — `inference_geo` threaded
-  onto requests, Fable's data-retention 400 re-raised actionably, and the
-  enterprise config profile routing deep tasks to Fable / mechanical to Haiku.
+- **Enterprise / Fable 5** (`tests/test_enterprise.py`) — the enterprise config
+  profile routing deep tasks to Fable / mechanical to Haiku, with HA storage and
+  SIEM audit wired.
 - **Web API** (`tests/test_web.py`) — FastAPI TestClient over state, scan,
   state-change (persistent-across-rescan), validation, ServiceNow, the
   **API-token guard** (401 without, accepted via header/cookie, healthz open),
@@ -881,9 +872,8 @@ clean gate and the package ships `py.typed`.
 `config/config.example.yaml` (secrets via `${ENV}`):
 
 - `ai` — default tier + per-task routing (`tasks.<name>`), plus `max_concurrency`
-  (bounded parallelism), `auto_route` (silent adaptive tier selection), `batch`
-  (Message Batches API, ~50% cost, async), and `inference_geo` (Anthropic data
-  residency). See `config/config.enterprise.yaml` for a Fable-5 enterprise profile.
+  (bounded parallelism) and `auto_route` (silent adaptive tier selection). See
+  `config/config.enterprise.yaml` for a Fable-5 enterprise profile.
 - `source` / `bitbucket` / `github` — repo inventory (scan surface), tokens, scoping, TLS.
 - `snyk` / `xray` — findings endpoints, tokens, TLS.
 - `openhack` — whitebox review: `enabled`/`findings_dir` (ingest), `auto`/`clone`/

@@ -35,42 +35,33 @@ def _interpolate(value: Any) -> Any:
 class TaskModel(_StrictModel):
     """Per-task override of the default AI tier. Unset fields inherit."""
 
-    provider: str | None = None      # anthropic | openai | google
-    model: str | None = None
+    provider: str | None = None      # only "foundry" is served
+    model: str | None = None         # Foundry model deployment name
     effort: str | None = None
     max_tokens: int | None = None
 
 
 class AIConfig(_StrictModel):
-    # Default tier — used by any task without a more specific override.
-    provider: str = "anthropic"      # anthropic | openai | google (per-supplier harness)
-    model: str = "claude-opus-4-8"
+    # Default tier — used by any task without a more specific override. All models
+    # are served through Microsoft Foundry: claude-* deployments use Anthropic's
+    # native Messages API on the resource; any other deployment (OpenAI GPT,
+    # Google Gemini, Mistral, ...) uses its OpenAI-compatible endpoint.
+    provider: str = "foundry"
+    model: str = "claude-opus-4-8"   # Foundry model deployment name
     effort: str = "high"
     max_tokens: int = 32000
-    # Data residency for Anthropic first-party requests, e.g. "us" or "eu" — pins
-    # inference to that region (enterprise compliance). Empty = provider default.
-    # Applies to the Anthropic supplier only; ignored by OpenAI/Google.
-    inference_geo: str = ""
     # Per-service AI calls (exploitability, threat modeling, enrichment, dedup) are
     # independent — run up to this many concurrently to cut wall-clock time on large
     # scans. Latency-only (same requests, same cost); 1 = sequential. Bounded to
     # stay within provider rate limits.
     max_concurrency: int = 4
     # Silent adaptive model selection: when true, each AI call is nudged up or down
-    # an Anthropic capability ladder (Haiku→Sonnet→Opus→Fable) from its configured
+    # the Claude capability ladder (Haiku→Sonnet→Opus→Fable) from its configured
     # tier based on how hard the work is — cheaper for trivial groups, stronger for
     # KEV/critical/large ones. Off by default (deterministic tiers); enabling it is
-    # the operator's explicit opt-in. Only shifts Anthropic models on the ladder;
-    # custom models and other suppliers are left exactly as configured.
+    # the operator's explicit opt-in. Only shifts Claude models on the ladder;
+    # custom deployments and other model families are left exactly as configured.
     auto_route: bool = False
-    # Submit each AI stage's per-service requests via the Anthropic Message
-    # Batches API — ~50% cheaper, but asynchronous (the scan blocks polling for up
-    # to batch_max_wait_seconds). Best for scheduled/overnight runs, not interactive
-    # use. Off = the synchronous concurrent path. Fable (needs refusal fallbacks,
-    # which Batches rejects) and non-Anthropic tasks fall back to synchronous.
-    batch: bool = False
-    batch_poll_seconds: int = 30
-    batch_max_wait_seconds: int = 3600
     # Route individual tasks to lower-cost or higher-capability models,
     # e.g. dedup -> Haiku, exploitability -> Opus/Fable. Built-in defaults live
     # in llm.py.
@@ -141,15 +132,15 @@ class OpenHackConfig(_StrictModel):
     # vulnerabilities missed) and flags cross-pass agreement as a confidence signal.
     # 1 = single pass (cheapest); 2+ recommended. Each pass is another set of calls.
     passes: int = 2
-    # Route each pass to a different supplier/model for independent coverage —
+    # Route each pass to a different model family for independent coverage —
     # different vendors miss different things, so diverse passes catch more and a
-    # cross-supplier agreement is a stronger confidence signal. Pass i uses
+    # cross-model agreement is a stronger confidence signal. Pass i uses
     # pass_models[i % len]; unset fields inherit the `openhack` task routing. Empty
     # = every pass uses the same routed model. e.g.:
     #   pass_models:
-    #     - { provider: anthropic, model: claude-opus-4-8 }
-    #     - { provider: openai,    model: gpt-5 }
-    #     - { provider: google,    model: gemini-2.5-pro }
+    #     - { model: claude-opus-4-8 }
+    #     - { model: gpt-5 }
+    #     - { model: mistral-large-2411 }
     pass_models: list[TaskModel] = []
     max_files: int = 60         # cap source files reviewed per repo (cost/latency)
     max_file_bytes: int = 60000  # skip files larger than this (bytes)

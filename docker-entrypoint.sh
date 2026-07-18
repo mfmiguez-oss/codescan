@@ -9,7 +9,7 @@ ARGS="$ARGS --port ${CODESCAN_PORT:-8000}"
 ARGS="$ARGS --config ${CODESCAN_CONFIG:-/app/config/config.example.yaml}"
 ARGS="$ARGS --fixtures ${CODESCAN_FIXTURES:-/app/fixtures}"
 
-# Enable the AI stages (needs ANTHROPIC_API_KEY in the environment).
+# Enable the AI stages (needs FOUNDRY_API_KEY + FOUNDRY_RESOURCE in the environment).
 [ "${CODESCAN_AI:-false}" = "true" ] && ARGS="$ARGS --ai"
 # Scan Bitbucket/Snyk/Xray instead of the sample fixtures (needs credentials).
 [ "${CODESCAN_LIVE:-false}" = "true" ] && ARGS="$ARGS --live"

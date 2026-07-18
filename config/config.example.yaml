@@ -2,37 +2,28 @@
 
 ai:
   # Default tier — used by any AI task without a more specific override below.
-  # provider selects the supplier (multi-provider harness): anthropic | openai |
-  # google | foundry. `openai` also covers any OpenAI-compatible endpoint via
-  # OPENAI_BASE_URL. `foundry` uses Microsoft Foundry via FOUNDRY_BASE_URL and
-  # FOUNDRY_API_KEY (or their AZURE_OPENAI_* equivalents).
-  provider: anthropic
+  # All models are served through Microsoft Foundry (the only provider): set
+  # FOUNDRY_API_KEY + FOUNDRY_RESOURCE (or FOUNDRY_BASE_URL / AZURE_OPENAI_*
+  # equivalents). `model` is the deployment name on your Foundry resource —
+  # claude-* deployments use Anthropic's native Messages API; any other family
+  # (OpenAI GPT, Google Gemini, Mistral, ...) uses the resource's
+  # OpenAI-compatible endpoint.
+  provider: foundry
   # Set to claude-fable-5 for the hardest analysis (the client auto-enables
-  # refusal fallbacks on Fable since security tooling can trip false-positive
-  # classifier refusals).
+  # client-side refusal fallbacks on Fable since security tooling can trip
+  # false-positive classifier refusals).
   model: claude-opus-4-8
-  effort: high            # low | medium | high | xhigh | max (Anthropic; ignored elsewhere)
+  effort: high            # low | medium | high | xhigh | max (Claude models; ignored elsewhere)
   max_tokens: 32000
-  # Data residency for Anthropic first-party requests (enterprise compliance):
-  # "us" / "eu" pins inference to that region. Empty = provider default. Anthropic
-  # supplier only. See config/config.enterprise.yaml for a Fable-5 enterprise profile.
-  inference_geo: ""
   # Per-service AI calls (exploitability, threat modeling, enrichment, dedup,
   # OpenHack) run independently — this many at once. Cuts wall-clock time on large
   # multi-repo scans; latency-only (same requests/cost). 1 = sequential.
   max_concurrency: 4
-  # Submit each AI stage's per-service requests via the Anthropic Message Batches
-  # API — ~50% cheaper, but asynchronous (the scan blocks polling for up to
-  # batch_max_wait_seconds). Best for scheduled/overnight runs. Fable and
-  # non-Anthropic tasks fall back to the synchronous path.
-  batch: false
-  batch_poll_seconds: 30
-  batch_max_wait_seconds: 3600
-  # Silent adaptive model selection. When true, each AI call is nudged up or down an
-  # Anthropic ladder (Haiku→Sonnet→Opus→Fable) from its configured tier by how hard
-  # the work is: trivial groups downgrade (cheaper), KEV/critical/large groups
-  # upgrade (stronger). Off = deterministic tiers. Only moves Anthropic models on
-  # the ladder; custom models and other suppliers are left as configured.
+  # Silent adaptive model selection. When true, each AI call is nudged up or down
+  # the Claude ladder (Haiku→Sonnet→Opus→Fable) from its configured tier by how
+  # hard the work is: trivial groups downgrade (cheaper), KEV/critical/large groups
+  # upgrade (stronger). Off = deterministic tiers. Only moves Claude models on
+  # the ladder; custom deployments and other model families are left as configured.
   auto_route: false
 
   # Per-task model routing: lower-cost models for mechanical work, deep models
@@ -47,13 +38,10 @@ ai:
       effort: xhigh
       # For the deepest chaining analysis, use:
       # model: claude-fable-5
-      # Or route this task to a different supplier entirely:
-      # provider: openai
+      # Or route this task to a different model family on your Foundry resource:
       # model: gpt-5
-      # provider: google
       # model: gemini-2.5-pro
-      # provider: foundry
-      # model: your-foundry-model-name
+      # model: mistral-large-2411
     enrichment:           # AI remediation guidance + tags (lower-cost, mechanical)
       model: claude-haiku-4-5
 
@@ -114,16 +102,16 @@ openhack:
   # ai.tasks.openhack (defaults to the deep default tier).
   passes: 2              # independent review passes; >=2 unions findings (higher
                          # recall) and flags cross-pass agreement. 1 = single pass.
-  # Route each pass to a different supplier/model so the passes are genuinely
-  # independent — diverse vendors miss different things, so the union catches more
-  # and a cross-supplier agreement (multi-supplier tag) is a stronger signal.
-  # Pass i uses pass_models[i % len]; unset fields inherit the openhack task tier.
-  # Empty = every pass uses the same routed model. A pass whose supplier has no key
-  # is skipped, not fatal. Needs the extra suppliers installed: pip install -e ".[providers]".
+  # Route each pass to a different model on the Foundry resource so the passes are
+  # genuinely independent — diverse model families miss different things, so the
+  # union catches more and a cross-model agreement (multi-model tag) is a stronger
+  # signal. Pass i uses pass_models[i % len]; unset fields inherit the openhack
+  # task tier. Empty = every pass uses the same routed model. A failing pass is
+  # skipped, not fatal.
   pass_models: []
-    # - { provider: anthropic, model: claude-opus-4-8 }
-    # - { provider: openai,    model: gpt-5 }
-    # - { provider: google,    model: gemini-2.5-pro }
+    # - { model: claude-opus-4-8 }
+    # - { model: gpt-5 }
+    # - { model: mistral-large-2411 }
   max_files: 60          # cap source files reviewed per repo
   max_file_bytes: 60000  # skip files larger than this
   min_confidence: low    # drop candidates below this confidence: low | medium | high

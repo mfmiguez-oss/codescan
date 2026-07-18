@@ -1,7 +1,7 @@
 # Production preset: live scan (Bitbucket/Snyk/Xray) + AI stages, pushing to
 # ServiceNow. Everything is environment-driven — no rebuild to reconfigure.
 #
-#   1. cp .env.example .env    # fill in ANTHROPIC_API_KEY, GITHUB_*/BITBUCKET_*,
+#   1. cp .env.example .env    # fill in FOUNDRY_API_KEY + FOUNDRY_RESOURCE, GITHUB_*/BITBUCKET_*,
 #                              #   SNYK_*, XRAY_*, SERVICENOW_*
 #   2. put your config at ./config/config.yaml (set servicenow.push: true to POST)
 #   3. docker compose -f docker-compose.prod.yml up -d --build

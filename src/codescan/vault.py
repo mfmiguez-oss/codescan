@@ -5,7 +5,7 @@ codescan resolves every secret through the environment (`${ENV}` interpolation i
 single seam: when `vault.enabled` is set, it fetches KV secrets from Vault and
 **injects them into `os.environ` before config interpolation runs**, so the rest
 of the config (`snyk.token: ${SNYK_TOKEN}`, `servicenow.password:
-${SERVICENOW_PASSWORD}`, `ANTHROPIC_API_KEY`, …) resolves from Vault with no other
+${SERVICENOW_PASSWORD}`, `FOUNDRY_API_KEY`, …) resolves from Vault with no other
 change. Each secret's keys become environment variable names.
 
 By default an already-set environment variable wins (so an operator can still

@@ -43,7 +43,7 @@ choices *are* the controls:
 |---|---|
 | Logging & Monitoring | Append-only audit → syslog/HEC, drift events, per-stage timings |
 | IAM | Secret management (Vault, env-only, constant-time token compare); per-user authN delegated to a fronting proxy (residual) |
-| Data Security | Metadata-only to LLM by default; TLS everywhere (verify on); least-privilege tokens; `ai.inference_geo` |
+| Data Security | Metadata-only to LLM by default; TLS everywhere (verify on); least-privilege tokens; Foundry resource region pinning |
 | Resilience / DoS | Rate limiting + per-scan ceiling; retry/backoff; per-item failure isolation; idempotent export |
 | Model supply chain | `pip-audit` + SBOM in CI for codescan's own deps; model-provider trust contractual (residual) |
 

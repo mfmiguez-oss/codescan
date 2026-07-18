@@ -143,15 +143,16 @@ class OpenHackEngine:
         Runs `cfg.passes` independent review passes (default 2) and **unions** the
         results: because AI source review is non-deterministic, a single pass can
         miss real issues, so multiple passes raise recall. With `cfg.pass_models`,
-        each pass runs on a different supplier/model — diverse vendors miss
-        different things, so the union is broader and cross-supplier agreement is a
+        each pass runs on a different model — diverse model families miss
+        different things, so the union is broader and cross-model agreement is a
         stronger signal. Duplicate findings across passes are consolidated (keyed on
         path + class + title), keeping the highest severity/confidence seen and
-        recording how many passes (and which suppliers) agreed — surfaced as
-        `corroborated` / `multi-supplier` tags and a note in the finding.
+        recording how many passes (and which models) agreed — surfaced as
+        `corroborated` / `multi-model` tags and a note in the finding.
 
-        A pass that fails (e.g. a supplier without a configured key) is logged and
-        skipped; the union still benefits from the passes that succeeded.
+        A pass that fails (e.g. a model deployment that doesn't exist on the
+        resource) is logged and skipped; the union still benefits from the passes
+        that succeeded.
 
         Returns the output directory (the same one passed in), so callers can hand
         it straight to `OpenHackConnector.from_dir`.
@@ -170,15 +171,15 @@ class OpenHackEngine:
                 for batch in self._batches(files, root):
                     result = self._review_batch(batch, repo or root.name, spec)
                     for finding in result.get("findings", []):
-                        self._merge(consolidated, finding, spec.provider)
-            except Exception as exc:  # noqa: BLE001 - isolate a failing pass/supplier
+                        self._merge(consolidated, finding, spec.model)
+            except Exception as exc:  # noqa: BLE001 - isolate a failing pass/model
                 logger.warning("OpenHack pass %d (%s/%s) failed: %s",
                                pass_idx + 1, spec.provider, spec.model, exc)
         self._write_candidates(fc_dir, consolidated, passes)
         return str(out)
 
     def _pass_spec(self, pass_idx: int):
-        """Resolve the supplier/model for pass `pass_idx` (cycles `pass_models`)."""
+        """Resolve the model for pass `pass_idx` (cycles `pass_models`)."""
         overrides = self.cfg.pass_models
         override = overrides[pass_idx % len(overrides)] if overrides else None
         return self.llm.resolve_spec(self.TASK, override)
@@ -244,17 +245,17 @@ class OpenHackEngine:
             f"security vulnerabilities present in this code.\n\n"
             + "\n\n".join(blocks)
         )
-        # `spec` pins this pass to its configured supplier/model.
+        # `spec` pins this pass to its configured model.
         return self.llm.complete_json(self.TASK, _SYSTEM, user, _SCHEMA, spec=spec)
 
     # --- cross-pass consolidation ----------------------------------------
-    def _merge(self, acc: dict[tuple[str, str, str], dict], f: dict, provider: str) -> None:
+    def _merge(self, acc: dict[tuple[str, str, str], dict], f: dict, model: str) -> None:
         """Fold one raw finding into the consolidation map, keyed on identity.
 
         Same weakness in the same file (path + vulnerability class + title) reported
         across passes collapses into one entry; distinct titles stay separate (union
         favors recall). Keeps the strongest severity/confidence seen and records how
-        many passes — and which suppliers — reported it.
+        many passes — and which models — reported it.
         """
         path = f.get("target_path", "") or ""
         vclass = (f.get("primary_vulnerability_class") or "unknown")
@@ -262,10 +263,10 @@ class OpenHackEngine:
         key = (path, vclass.lower(), title.strip().lower())
         cur = acc.get(key)
         if cur is None:
-            acc[key] = {"finding": dict(f), "passes": 1, "providers": {provider}}
+            acc[key] = {"finding": dict(f), "passes": 1, "models": {model}}
             return
         cur["passes"] += 1
-        cur["providers"].add(provider)
+        cur["models"].add(model)
         best = cur["finding"]
         if _SEV_RANK.get((f.get("severity") or "").lower(), 0) > _SEV_RANK.get((best.get("severity") or "").lower(), 0):
             best["severity"] = f.get("severity")
@@ -286,17 +287,17 @@ class OpenHackEngine:
             candidate_id = f"OH-{n:04d}"
             vclass = f.get("primary_vulnerability_class", "") or "unknown"
             summary = f.get("summary", "")
-            providers = sorted(entry.get("providers", set()))
+            models = sorted(entry.get("models", set()))
             tags = ["openhack"]
             if passes > 1:
-                supplier_note = f" (suppliers: {', '.join(providers)})" if len(providers) > 1 else ""
+                model_note = f" (models: {', '.join(models)})" if len(models) > 1 else ""
                 summary = (
                     f"{summary}\n\nReview agreement: identified in {found} of {passes} "
-                    f"independent whitebox review passes{supplier_note}."
+                    f"independent whitebox review passes{model_note}."
                 ).strip()
                 tags.append("corroborated" if found >= 2 else "single-pass")
-                if len(providers) >= 2:
-                    tags.append("multi-supplier")
+                if len(models) >= 2:
+                    tags.append("multi-model")
             envelope = {
                 "candidate_id": candidate_id,
                 "expert": vclass,

@@ -8,7 +8,7 @@ services:
       CODESCAN_HOST: "0.0.0.0"
       CODESCAN_PORT: "8000"
       # Enable the AI stages (exploitability, chaining, threat modeling,
-      # semantic dedup, AI enrichment). Requires ANTHROPIC_API_KEY below.
+      # semantic dedup, AI enrichment). Requires FOUNDRY_API_KEY + FOUNDRY_RESOURCE below.
       CODESCAN_AI: "false"
       # Scan live Bitbucket/Snyk/Xray instead of the bundled sample fixtures.
       # Requires the connector credentials below.

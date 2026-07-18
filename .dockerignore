@@ -10,15 +10,20 @@ venv
 __pycache__
 *.pyc
 .pytest_cache
+.mypy_cache
+.ruff_cache
 *.egg-info
+build
+dist
 tests
 docs
 .claude
 .env
+.openhack
 # generated runtime artifacts
 config.overrides.json
 servicenow_import.*
 validation_state.json
 threat_models.json
-sn_demo.*
-state_demo.json
+audit.jsonl
+state.db
