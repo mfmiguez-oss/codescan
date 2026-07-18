@@ -861,6 +861,11 @@ complete, scored, exportable result. AI enriches; it is never a hard dependency.
   time-based refill, per-client isolation, idle-bucket eviction.
 - **CLI wiring** (`tests/test_cli.py`) — `--whitebox` enables the built-in
   OpenHack engine for the target repo and is rejected with `--no-ai`.
+- **Live CLI smoke** (`tests/test_cli_live.py`) — **opt-in, excluded from the
+  offline gate** (skips unless `CODESCAN_LIVE_TEST=1`): loads `.env`, picks a
+  Claude deployment that exists on the Foundry resource, and runs the real
+  `codescan scan` CLI over the fixtures with the AI stages live — proving the
+  CLI → pipeline → Foundry → ServiceNow-export path end to end.
 - **Adversarial / robustness** (`tests/test_security.py`) — the ATLAS-aligned
   threat model's guards: injection text carried as data only, a hostile model
   response can't invent findings or inflate scores (id allow-listing, score

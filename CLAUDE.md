@@ -25,7 +25,10 @@ pytest -q                # offline, deterministic, no network, no API key
 ```
 
 Add tests for every feature. Tests must keep running offline (the AI stages are
-validated by contract/schema with fake clients, never live calls).
+validated by contract/schema with fake clients, never live calls). The one
+exception is opt-in and outside the gate: `CODESCAN_LIVE_TEST=1 pytest
+tests/test_cli_live.py` runs the real CLI against the Foundry resource in
+`.env` (skips otherwise).
 
 ## Change workflow
 

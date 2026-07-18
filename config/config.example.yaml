@@ -12,8 +12,8 @@ ai:
   # Set to claude-fable-5 for the hardest analysis (the client auto-enables
   # client-side refusal fallbacks on Fable since security tooling can trip
   # false-positive classifier refusals).
-  model: claude-opus-4-8
-  effort: high            # low | medium | high | xhigh | max (Claude models; ignored elsewhere)
+  model: claude-opus-4-7
+  effort: medium            # low | medium | high | xhigh | max (Claude models; ignored elsewhere)
   max_tokens: 32000
   # Per-service AI calls (exploitability, threat modeling, enrichment, dedup,
   # OpenHack) run independently — this many at once. Cuts wall-clock time on large
@@ -34,8 +34,8 @@ ai:
       model: claude-haiku-4-5
       max_tokens: 8000    # note: Haiku ignores `effort`; the client omits it
     exploitability:       # per-finding exploitability + attack-chain reasoning
-      model: claude-opus-4-8
-      effort: xhigh
+      model: claude-opus-4-7
+      effort: medium
       # For the deepest chaining analysis, use:
       # model: claude-fable-5
       # Or route this task to a different model family on your Foundry resource:
@@ -113,7 +113,7 @@ openhack:
     # - { model: mistral-large-2411 }
   max_files: 60          # cap source files reviewed per repo
   max_file_bytes: 60000  # skip files larger than this
-  min_confidence: low    # drop candidates below this confidence: low | medium | high
+  min_confidence: medium    # drop candidates below this confidence: low | medium | high
 
 servicenow:
   instance: ${SERVICENOW_INSTANCE}
@@ -125,7 +125,7 @@ servicenow:
   import_table: sn_vul_vulnerable_item
   # Output format for the on-disk artifact: json (servicenow_import.json) or
   # csv (servicenow_import.csv, for CSV Import Sets). Also settable in the UI.
-  format: json
+  format: csv
 
 enrichment:
   # CISA Known Exploited Vulnerabilities catalog.
