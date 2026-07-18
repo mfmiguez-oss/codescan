@@ -52,3 +52,10 @@ ignore_missing_imports = true
 no_implicit_optional = true
 warn_redundant_casts = true
 warn_unused_ignores = true
+
+# numpy is not a codescan dependency — mypy only reaches it through
+# openai._extras (a lazy numpy proxy in the openai SDK), and numpy's stubs use
+# PEP 695 syntax that aborts checking under python_version 3.10. Skip the chain.
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*", "openai._extras.*"]
+follow_imports = "skip"
