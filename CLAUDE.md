@@ -63,7 +63,8 @@ and `docs/SECURITY_FRAMEWORKS.md` as applicable.
 
 All gitignored — clean any strays before committing: `audit.jsonl`, `state.db`,
 `servicenow_import.json`, `validation_state.json`, `threat_models.json`,
-`config.overrides.json`, `.env`. Secrets live in the environment or Vault only.
+`threat_models.md`, `config.overrides.json`, `.env`. Secrets live in the
+environment or Vault only.
 
 ## Running it
 

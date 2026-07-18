@@ -25,5 +25,6 @@ config.overrides.json
 servicenow_import.*
 validation_state.json
 threat_models.json
+threat_models.md
 audit.jsonl
 state.db

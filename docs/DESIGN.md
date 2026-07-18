@@ -560,9 +560,12 @@ stops counting on the next scan. The views:
   optional one-line note with the decision — persisted, audited, prefilled on
   reopen, preserved across quick row-level state changes, and fed to the AI on
   similar findings (§5.7a).
-- **Threats** — the per-service threat models (§5.10): STRIDE threats with
-  linked findings/chains, assets, entry points, trust boundaries, posture, and
-  recommendations.
+- **Threats** — the per-service threat models (§5.10): each opens with an
+  **attack-surface diagram** (inline SVG, no chart library) — external attacker
+  → entry points → threats crossing the trust boundary → assets, with each
+  threat drawn as a STRIDE-colored connector (hue = category, width =
+  likelihood) — above the STRIDE threats with linked findings/chains, assets,
+  entry points, trust boundaries, posture, and recommendations.
 - **Calibration** — the score-calibration report (§5.7b): confirm rate by
   predicted-score bucket, score separation, and the noisiest weakness
   families/components.
@@ -608,10 +611,26 @@ chains), threat modeling is the top-down counterpart. Per service it produces a
 It's **on by default** (`threat_model.enabled`; only runs when the AI stages are
 enabled — set false to skip the extra per-service call), per-service (like
 exploitability), routed to the `threat_model` task (the default deep tier unless
-overridden), and emits a `threat_models.json` artifact alongside the ServiceNow
-export. Threats
-reference findings by ID, so the UI cross-links both directions (a finding's
-drawer shows the threats it belongs to; a threat lists its findings).
+overridden). Alongside the ServiceNow export it emits two artifacts: the
+machine-readable `threat_models.json`, and a human-readable **`threat_models.md`**
+— a Markdown report with a **Mermaid attack-surface diagram per service**
+(`threat_models_to_markdown` / `_service_mermaid`): external attacker → entry
+points → threats crossing the trust boundary → assets, each threat a
+STRIDE-coloured node labelled with its likelihood. Mermaid renders on GitHub and
+most Markdown viewers, so the diagram is viewable straight from a CLI run with no
+UI. Threats reference findings by ID, so the UI cross-links both directions (a
+finding's drawer shows the threats it belongs to; a threat lists its findings).
+
+The Threats tab renders the same model as an **attack-surface diagram** — a
+self-contained inline SVG built client-side from the model's own fields (no
+chart library, matching the dependency-free UI): the external attacker flows
+through the **entry points**, threats cross the dashed **trust boundary** as
+STRIDE-colored connectors (hue = category, line width = likelihood, hover for
+the threat), and land on the **assets** inside. It reads directly from the
+serialized model, so no backend change is needed; long lists are capped in the
+picture and shown in full as cards beneath it. Both the SVG (UI) and Mermaid
+(Markdown) diagrams share the same STRIDE palette; label text is sanitized so
+arrows/quotes/angle brackets in AI-generated titles can't break the Mermaid.
 
 **It feeds back into scoring.** Because it runs *before* the scorer (unlike a
 terminal report), `apply_threat_influence` writes results back onto findings: it

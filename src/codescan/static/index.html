@@ -109,6 +109,15 @@
   .lozenge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px;
              background: var(--panel2); border: 1px solid var(--line); color: var(--muted); margin: 2px 4px 2px 0; }
   .fref { cursor: pointer; color: var(--accent); }
+  /* threat-model attack-surface diagram */
+  .tmdiag { overflow-x: auto; padding: 4px 0; }
+  .tmdiag svg { display: block; min-width: 640px; }
+  .tmdiag text { fill: var(--txt); font-family: inherit; }
+  .tmdiag .dmuted { fill: var(--muted); }
+  .tmleg { display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+           margin-top: 8px; font-size: 11px; color: var(--muted); }
+  .tmleg .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+               margin-right: 5px; vertical-align: middle; }
   /* overview */
   .ovgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
             gap: 12px; margin-bottom: 16px; }
@@ -197,6 +206,12 @@ const riskColor = (s) => s >= 85 ? 'var(--crit)' : s >= 70 ? 'var(--high)' : s >
 const riskColorName = (rl) => ({critical:'var(--crit)',high:'var(--high)',medium:'var(--med)',low:'var(--low)'}[rl] || 'var(--info)');
 const sevColor = (s) => ({critical:'var(--crit)',high:'var(--high)',medium:'var(--med)',low:'var(--low)',info:'var(--info)'}[s] || 'var(--info)');
 const esc = (t) => (t ?? '').toString().replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const escA = (t) => esc(t).replace(/"/g, '&quot;');
+// STRIDE category → distinct hue + one-letter mnemonic, for the threat diagram.
+const STRIDE_COLOR = { spoofing:'#6366f1', tampering:'#f59e0b', repudiation:'#14b8a6',
+  information_disclosure:'#0ea5e9', denial_of_service:'#ef4444', elevation_of_privilege:'#a855f7' };
+const STRIDE_ABBR = { spoofing:'S', tampering:'T', repudiation:'R',
+  information_disclosure:'I', denial_of_service:'D', elevation_of_privilege:'E' };
 
 async function load(payload) {
   DATA = payload;
@@ -518,11 +533,104 @@ function tmCard(tm) {
       <span class="rl" style="background:${riskColorName(rl)}">${esc(rl)}</span>
       <span class="muted">${(tm.threats || []).length} threats</span></div>
     <p class="hint" style="font-size:13px">${esc(tm.posture_summary || '')}</p>
+    ${tmDiagram(tm)}
     ${assets ? `<div class="section"><h3>Assets</h3>${assets}</div>` : ''}
     ${entries ? `<div class="section"><h3>Entry points</h3>${entries}</div>` : ''}
     ${bounds ? `<div class="section"><h3>Trust boundaries</h3>${bounds}</div>` : ''}
     <div class="section"><h3>Threats</h3>${(tm.threats || []).map(threatItem).join('') || '<span class="muted">none</span>'}</div>
     ${recs ? `<div class="section"><h3>Recommendations</h3><ul style="margin:0;padding-left:18px">${recs}</ul></div>` : ''}
+  </div>`;
+}
+
+// Render the STRIDE threat model as an attack-surface data-flow diagram:
+// external attacker → entry points → (threats crossing the trust boundary) → assets.
+// Pure inline SVG (the page ships no chart library); colors come from CSS vars so
+// it stays theme-consistent, STRIDE hues are semantic.
+function tmDiagram(tm) {
+  const assets = tm.assets || [], entries = tm.entry_points || [], threats = tm.threats || [];
+  if (!assets.length && !entries.length && !threats.length) return '';
+
+  const W = 720, BH = 30, VG = 10, LEG = 30, PADB = 14;
+  const entryX = 158, entryW = 172, entryR = entryX + entryW;    // entry column
+  const bx = 400;                                                // trust-boundary left edge
+  const assetX = 422, assetW = W - assetX - 16;                  // asset column (inside boundary)
+  const actorX = 12, actorW = 96, actorH = 44;
+
+  // Cap rows so a big model stays readable; the full lists render as cards below.
+  const cap = (arr, n) => arr.length > n ? arr.slice(0, n - 1).concat([{ __more: arr.length - (n - 1) }]) : arr;
+  const eShow = cap(entries, 6), aShow = cap(assets, 6), tShow = threats.slice(0, 10);
+  const nE = eShow.length, nA = aShow.length;
+
+  const colH = n => n > 0 ? n * BH + (n - 1) * VG : 0;
+  const contentH = Math.max(colH(nE), colH(nA), actorH, 44);
+  const top = LEG + 6, H = top + contentH + PADB, cy = top + contentH / 2;
+  const y0 = n => top + (contentH - colH(n)) / 2;
+  const trunc = (s, w) => { const m = Math.max(6, Math.floor((w - 16) / 6.4)); s = String(s || ''); return s.length > m ? s.slice(0, m - 1) + '…' : s; };
+
+  const defs = Object.entries(STRIDE_COLOR).map(([k, c]) =>
+    `<marker id="ah-${k}" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="${c}"/></marker>`
+  ).join('') + `<marker id="ah-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L5,3 L0,6 Z" style="fill:var(--muted)"/></marker>`;
+
+  const box = (x, y, w, label, sub, fill) =>
+    `<g><rect x="${x}" y="${y}" width="${w}" height="${BH}" rx="6" style="fill:${fill || 'var(--panel2)'};stroke:var(--line)"/>` +
+    `<title>${esc(sub ? label + ' — ' + sub : label)}</title>` +
+    `<text x="${x + 9}" y="${y + BH / 2 + 4}" font-size="11">${esc(trunc(label, w))}</text></g>`;
+
+  let g = '';
+  // External attacker actor.
+  const ay = cy - actorH / 2;
+  g += `<rect x="${actorX}" y="${ay}" width="${actorW}" height="${actorH}" rx="8" style="fill:var(--panel);stroke:var(--accent)"/>` +
+    `<text x="${actorX + actorW / 2}" y="${ay + 19}" font-size="11" text-anchor="middle">External</text>` +
+    `<text x="${actorX + actorW / 2}" y="${ay + 33}" font-size="11" text-anchor="middle" class="dmuted">attacker</text>`;
+
+  // Entry points + actor→entry arrows.
+  eShow.forEach((e, i) => {
+    const y = y0(nE) + i * (BH + VG), yc = y + BH / 2;
+    g += `<line x1="${actorX + actorW}" y1="${cy}" x2="${entryX}" y2="${yc}" style="stroke:var(--muted)" stroke-width="1" opacity=".5" marker-end="url(#ah-arrow)"/>`;
+    g += e.__more ? `<text x="${entryX}" y="${yc + 4}" font-size="11" class="dmuted">+${e.__more} more entry points</text>` : box(entryX, y, entryW, e.name, e.description);
+  });
+  if (!nE) g += `<text x="${entryX}" y="${cy + 4}" font-size="11" class="dmuted">(no entry points)</text>`;
+
+  // Trust boundary around the assets, labelled at the top edge.
+  const bTop = top - 4, bH = contentH + 8;
+  g += `<rect x="${bx}" y="${bTop}" width="${W - bx - 8}" height="${bH}" rx="10" style="fill:none;stroke:var(--accent)" stroke-dasharray="5 4" opacity=".65"/>`;
+  const blabel = (tm.trust_boundaries || []).join(', ') || 'trust boundary';
+  g += `<g><rect x="${bx + 10}" y="${bTop - 9}" width="${Math.min(288, 22 + blabel.length * 5.4)}" height="18" rx="4" style="fill:var(--bg);stroke:var(--accent)" opacity=".95"/>` +
+    `<title>${esc('Trust boundary: ' + blabel)}</title>` +
+    `<text x="${bx + 18}" y="${bTop + 4}" font-size="10" class="dmuted">⬚ ${esc(trunc(blabel, 280))}</text></g>`;
+
+  // Assets inside the boundary.
+  aShow.forEach((a, i) => {
+    const y = y0(nA) + i * (BH + VG);
+    g += a.__more ? `<text x="${assetX}" y="${y + BH / 2 + 4}" font-size="11" class="dmuted">+${a.__more} more assets</text>` : box(assetX, y, assetW, a.name, a.sensitivity, 'var(--panel)');
+  });
+  if (!nA) g += `<text x="${assetX}" y="${cy + 4}" font-size="11" class="dmuted">(no assets)</text>`;
+
+  // Threats crossing the boundary: one STRIDE-colored connector per threat,
+  // fanned vertically, width by likelihood, numbered T1…Tn to match the cards.
+  const LW = { high: 3.4, medium: 2.2, low: 1.3 }, OP = { high: .95, medium: .8, low: .6 };
+  const mx = (entryR + assetX) / 2;
+  tShow.forEach((t, i) => {
+    const c = STRIDE_COLOR[t.stride] || '#8b97ad';
+    const frac = tShow.length > 1 ? i / (tShow.length - 1) : .5;
+    const yy = top + 10 + frac * (contentH - 20);
+    const tip = `T${i + 1} · ${t.stride} · ${t.likelihood || '?'} likelihood — ${t.title}`;
+    g += `<path d="M${entryR},${yy} C ${mx - 24},${yy} ${mx + 24},${yy} ${assetX},${yy}" fill="none" stroke="${c}" stroke-width="${LW[t.likelihood] || 1.6}" opacity="${OP[t.likelihood] || .7}" ${STRIDE_COLOR[t.stride] ? `marker-end="url(#ah-${t.stride})"` : ''}><title>${esc(tip)}</title></path>`;
+    g += `<g><circle cx="${mx}" cy="${yy}" r="8.5" style="fill:var(--bg)" stroke="${c}" stroke-width="1.5"/>` +
+      `<title>${esc(tip)}</title>` +
+      `<text x="${mx}" y="${yy + 3.5}" font-size="9" text-anchor="middle" fill="${c}">${STRIDE_ABBR[t.stride] || '•'}</text></g>`;
+  });
+
+  const legend = Object.entries(STRIDE_COLOR)
+    .filter(([k]) => threats.some(t => t.stride === k))
+    .map(([k, c]) => `<span><span class="sw" style="background:${c}"></span>${esc(k.replace(/_/g, ' '))}</span>`).join('');
+  const more = threats.length > tShow.length ? `<span class="dmuted">+${threats.length - tShow.length} more threats below</span>` : '';
+
+  return `<div class="section"><h3>Attack-surface diagram</h3>
+    <div class="tmdiag"><svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMinYMin meet" role="img" aria-label="STRIDE threat model diagram for ${escA(tm.service)}">
+      <defs>${defs}</defs>${g}
+    </svg></div>
+    <div class="tmleg">${legend}${legend && more ? ' · ' : ''}${more}<span class="dmuted" style="margin-left:auto">thicker line = higher likelihood</span></div>
   </div>`;
 }
 

@@ -20,6 +20,7 @@ state.db
 servicenow_import.json
 validation_state.json
 threat_models.json
+threat_models.md
 config.overrides.json
 .openhack/
 

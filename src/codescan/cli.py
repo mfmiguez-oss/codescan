@@ -94,6 +94,10 @@ def scan(
             _print_chain(chain)
 
     console.print(f"\nServiceNow import written to [green]{written}[/green]")
+    if result.threat_models:
+        tm_md = Path(out).with_name("threat_models.md")
+        console.print(f"Threat model diagrams written to [green]{tm_md}[/green] "
+                      f"({len(result.threat_models)} service(s), Mermaid)")
 
 
 @app.command()

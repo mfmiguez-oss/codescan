@@ -37,7 +37,7 @@ from .models import Finding, Repo, ThreatModel
 from .openhack_runner import OpenHackRunner
 from .scoring import Scorer
 from .servicenow import ServiceNowExporter
-from .threatmodel import ThreatModelEngine, apply_threat_influence
+from .threatmodel import ThreatModelEngine, apply_threat_influence, threat_models_to_markdown
 from .validation import active_chains, annotate_chain_states, assign_states, open_state_store
 
 logger = logging.getLogger(__name__)
@@ -230,6 +230,11 @@ class Pipeline:
                 Path(out_path).with_name("threat_models.json").write_text(
                     json.dumps([tm.model_dump() for tm in threat_models], indent=2),
                     encoding="utf-8",
+                )
+                # Human-readable companion: per-service Mermaid attack-surface
+                # diagrams (renders on GitHub and most Markdown viewers).
+                Path(out_path).with_name("threat_models.md").write_text(
+                    threat_models_to_markdown(threat_models), encoding="utf-8",
                 )
 
         Scorer(self.cfg.scoring).score(findings, counted)

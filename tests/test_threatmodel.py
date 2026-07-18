@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from codescan.models import Component, Finding, Location, Severity, Source
+from codescan.models import (
+    Asset, Component, EntryPoint, Finding, Location, Severity, Source, Stride,
+    Threat, ThreatModel,
+)
 from codescan.threatmodel import (
     ThreatModelEngine, apply_threat_influence, service_risk_score,
+    threat_models_to_markdown,
 )
 
 
@@ -100,4 +104,50 @@ def test_service_risk_score():
     assert service_risk_score("critical") == 100.0
     assert service_risk_score("low") == 20.0
     assert service_risk_score("") == 0.0
+
+
+def _model() -> ThreatModel:
+    return ThreatModel(
+        service="PAY/checkout", risk_level="high",
+        posture_summary="Exposed callback enables SSRF and RCE.",
+        assets=[Asset(name='card "data"', sensitivity="high")],   # quote must be sanitized
+        entry_points=[EntryPoint(name="payment-callback", description="user URLs")],
+        trust_boundaries=["internet -> checkout"],   # arrow must be neutralized for Mermaid
+        threats=[
+            Threat(id="T1", title="RCE via Log4Shell",
+                   stride=Stride.elevation_of_privilege, likelihood="high",
+                   impact="full compromise", mitigations=["upgrade log4j"]),
+            Threat(id="T2", title="SSRF to metadata service",
+                   stride=Stride.information_disclosure, likelihood="medium"),
+        ],
+        recommendations=["patch log4j"],
+    )
+
+
+def test_markdown_has_mermaid_attack_surface_diagram():
+    md = threat_models_to_markdown([_model()])
+
+    assert md.startswith("# codescan — threat models")
+    assert "## PAY/checkout" in md
+    assert "```mermaid" in md and "flowchart LR" in md
+    # Actor -> entry points -> threats crossing the boundary -> assets.
+    assert '"External attacker"' in md
+    assert "subgraph EP" in md and "subgraph AS" in md
+    assert "Trust boundary: internet → checkout" in md   # -> neutralized inside the label
+    assert "internet -> checkout" not in md              # no raw arrow in the mermaid block
+    # One STRIDE-classed threat node per threat, wired surface -> threat -> assets.
+    assert "T0 --> AS" in md and "EP --> T0" in md
+    assert ":::strideElevationOfPrivilege" in md
+    assert "classDef strideElevationOfPrivilege fill:#a855f7" in md
+    # Likelihood is surfaced on the threat node; the threat list follows.
+    assert "elevation_of_privilege · high" in md
+    assert "### Threats" in md and "### Recommendations" in md
+    # Labels are sanitized for Mermaid — no stray double quote breaks a node.
+    assert 'card "data"' not in md and "card 'data'" in md
+
+
+def test_markdown_handles_no_models():
+    md = threat_models_to_markdown([])
+    assert "No threat models were produced" in md
+    assert "```mermaid" not in md
 

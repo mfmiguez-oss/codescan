@@ -240,9 +240,14 @@ boundaries**, and **STRIDE threats** the findings and chains actually enable —
 each threat linked to its findings/chains, with likelihood, impact, and
 mitigations — plus an overall posture and recommendations. **On by default** when
 the AI stages are enabled (`threat_model.enabled`; toggle in the Config tab, or
-set false to skip the extra per-service call). It writes `threat_models.json` and
-powers the Threats tab. Route it via the `threat_model` task (default deep tier;
-`claude-fable-5` for the deepest analysis).
+set false to skip the extra per-service call). It powers the Threats tab and
+writes two artifacts next to the ServiceNow export: `threat_models.json` and a
+human-readable **`threat_models.md`** — a Markdown report with a **Mermaid
+attack-surface diagram per service** (external attacker → entry points → threats
+crossing the trust boundary → assets, each threat a STRIDE-coloured node with its
+likelihood). Mermaid renders on GitHub and most Markdown viewers, so you get the
+diagram straight from a CLI run — no UI needed. Route it via the `threat_model`
+task (default deep tier; `claude-fable-5` for the deepest analysis).
 
 ## Composite scoring
 
@@ -402,8 +407,12 @@ section, which also takes an optional one-line note explaining the decision
 (persisted, audited, and shown to the AI on similar findings). A rescan never
 overturns an analyst's call.
 
-A **Threats** tab shows the per-service **STRIDE threat models** (see below):
-threats linked to their findings and chains, assets, entry points, trust
+A **Threats** tab shows the per-service **STRIDE threat models** (see below).
+Each opens with an **attack-surface diagram** — a dependency-free inline SVG:
+the external attacker flows through the entry points, threats cross the trust
+boundary as STRIDE-colored connectors (hue = category, thickness = likelihood,
+hover for the threat), and land on the assets inside — above the full threat
+list linked to its findings and chains, plus assets, entry points, trust
 boundaries, posture, and recommendations.
 
 A **Calibration** tab grades past risk scores against analysts' manual

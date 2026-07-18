@@ -167,6 +167,120 @@ class ThreatModelEngine:
 _LIKELIHOOD = {"high": 100.0, "medium": 60.0, "low": 30.0}
 
 
+# --- Markdown / Mermaid report -------------------------------------------
+
+# STRIDE category -> fill colour + Mermaid classDef name (mirrors the web UI).
+_STRIDE_HEX = {
+    Stride.spoofing: "#6366f1", Stride.tampering: "#f59e0b",
+    Stride.repudiation: "#14b8a6", Stride.information_disclosure: "#0ea5e9",
+    Stride.denial_of_service: "#ef4444", Stride.elevation_of_privilege: "#a855f7",
+}
+_STRIDE_CLASS = {s: "stride" + s.value.title().replace("_", "") for s in Stride}
+
+
+def _mm(text: str, limit: int = 48) -> str:
+    """Sanitize a label for a Mermaid node (quoted): collapse whitespace, and
+    neutralize characters that break Mermaid even inside quotes — double quotes,
+    arrows (`->`), and stray angle brackets — then bound the length."""
+    t = " ".join(str(text or "").split()).replace('"', "'")
+    t = t.replace("-->", "→").replace("->", "→").replace("<-", "←")
+    t = t.replace("<", "‹").replace(">", "›")
+    return (t[: limit - 1] + "…") if len(t) > limit else t
+
+
+def _service_mermaid(tm: ThreatModel) -> str:
+    """A flowchart: attacker -> entry points -> threats crossing the trust
+    boundary -> assets. Threat nodes are STRIDE-coloured; likelihood is labelled."""
+    lines = ["flowchart LR", '  ATK(["External attacker"]):::actor']
+
+    entries = tm.entry_points[:8]
+    if entries:
+        lines.append('  subgraph EP["Entry points"]')
+        lines.append("    direction TB")
+        for i, e in enumerate(entries):
+            lines.append(f'    E{i}["{_mm(e.name)}"]')
+        lines.append("  end")
+        lines.append("  ATK --> EP")
+        src = "EP"
+    else:
+        src = "ATK"
+
+    assets = tm.assets[:8]
+    sink = None
+    if assets:
+        bl = ", ".join(tm.trust_boundaries) or "trust boundary"
+        lines.append(f'  subgraph AS["Trust boundary: {_mm(bl, 60)}"]')
+        lines.append("    direction TB")
+        for i, a in enumerate(assets):
+            label = a.name + (f" · {a.sensitivity}" if a.sensitivity else "")
+            lines.append(f'    A{i}[("{_mm(label)}")]:::asset')
+        lines.append("  end")
+        sink = "AS"
+
+    threats = tm.threats[:12]
+    for i, t in enumerate(threats):
+        cls = _STRIDE_CLASS.get(t.stride, "")
+        label = f"T{i + 1} · {t.stride.value} · {t.likelihood or '?'}<br/>{_mm(t.title, 44)}"
+        node = f'T{i}{{{{"{label}"}}}}' + (f":::{cls}" if cls else "")
+        lines.append(f"  {node}")
+        lines.append(f"  {src} --> T{i}" + (f" --> {sink}" if sink else ""))
+    if not threats and sink:
+        lines.append(f"  {src} --> {sink}")
+
+    lines.append("  classDef actor fill:#1e293b,stroke:#4f8cff,color:#e6ebf5;")
+    lines.append("  classDef asset fill:#171d2b,stroke:#2a3346,color:#e6ebf5;")
+    for s in Stride:
+        lines.append(f"  classDef {_STRIDE_CLASS[s]} fill:{_STRIDE_HEX[s]},color:#0b0f18,stroke:#0b0f18;")
+    return "\n".join(lines)
+
+
+def threat_models_to_markdown(models: list[ThreatModel]) -> str:
+    """Render the threat models as a Markdown document with a per-service
+    Mermaid attack-surface diagram (renders on GitHub and most Markdown viewers)."""
+    out = ["# codescan — threat models", ""]
+    if not models:
+        out.append("_No threat models were produced (needs findings + AI threat modeling enabled)._")
+        return "\n".join(out) + "\n"
+
+    out.append("Per-service STRIDE threat models. Each diagram shows the external "
+               "attacker reaching the service's **entry points**, the **threats** "
+               "crossing the **trust boundary** (coloured by STRIDE category, "
+               "labelled with likelihood), and the **assets** they target.")
+    out.append("")
+    out.append("**STRIDE:** " + " · ".join(f"{s.value}" for s in Stride))
+    out.append("")
+
+    for tm in models:
+        out.append(f"## {tm.service}")
+        out.append("")
+        out.append(f"**Risk:** {tm.risk_level or 'n/a'}")
+        if tm.posture_summary:
+            out.append("")
+            out.append(tm.posture_summary)
+        out.append("")
+        out.append("```mermaid")
+        out.append(_service_mermaid(tm))
+        out.append("```")
+        out.append("")
+        if tm.threats:
+            out.append("### Threats")
+            out.append("")
+            for i, t in enumerate(tm.threats):
+                out.append(f"- **T{i + 1} · {t.title}** "
+                           f"(`{t.stride.value}`, {t.likelihood or '?'} likelihood)"
+                           + (f" — {t.impact}" if t.impact else ""))
+                if t.mitigations:
+                    out.append("  - Mitigations: " + "; ".join(t.mitigations))
+            out.append("")
+        if tm.recommendations:
+            out.append("### Recommendations")
+            out.append("")
+            out.extend(f"- {r}" for r in tm.recommendations)
+            out.append("")
+
+    return "\n".join(out) + "\n"
+
+
 def apply_threat_influence(
     findings: list[Finding], threat_models: list[ThreatModel]
 ) -> dict[str, str]:
