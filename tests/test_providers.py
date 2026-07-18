@@ -15,7 +15,7 @@ from codescan.providers.openai_provider import OpenAIProvider
 
 
 def test_registry_resolves_suppliers():
-    assert set(PROVIDERS) == {"anthropic", "openai", "google"}
+    assert set(PROVIDERS) == {"anthropic", "openai", "google", "foundry"}
     assert isinstance(get_provider("anthropic"), AnthropicProvider)
     assert isinstance(get_provider("openai"), OpenAIProvider)
     assert isinstance(get_provider("google"), GoogleProvider)

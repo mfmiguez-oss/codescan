@@ -3,7 +3,9 @@
 ai:
   # Default tier — used by any AI task without a more specific override below.
   # provider selects the supplier (multi-provider harness): anthropic | openai |
-  # google. `openai` also covers any OpenAI-compatible endpoint via OPENAI_BASE_URL.
+  # google | foundry. `openai` also covers any OpenAI-compatible endpoint via
+  # OPENAI_BASE_URL. `foundry` uses Microsoft Foundry via FOUNDRY_BASE_URL and
+  # FOUNDRY_API_KEY (or their AZURE_OPENAI_* equivalents).
   provider: anthropic
   # Set to claude-fable-5 for the hardest analysis (the client auto-enables
   # refusal fallbacks on Fable since security tooling can trip false-positive
@@ -50,6 +52,8 @@ ai:
       # model: gpt-5
       # provider: google
       # model: gemini-2.5-pro
+      # provider: foundry
+      # model: your-foundry-model-name
     enrichment:           # AI remediation guidance + tags (lower-cost, mechanical)
       model: claude-haiku-4-5
 

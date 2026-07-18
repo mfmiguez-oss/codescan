@@ -87,9 +87,10 @@ can trip Fable's false-positive classifier refusals.
 Every AI stage goes through a **provider harness** (`providers/`) so tasks can
 run on models from **different suppliers**: `anthropic` (native structured
 outputs, adaptive thinking, effort, Fable fallbacks), `openai` (and any
-OpenAI-compatible endpoint via `OPENAI_BASE_URL`), and `google` (Gemini). Each
-supplier implements the same `complete_json` contract; non-Anthropic SDKs are
-optional (`pip install -e ".[providers]"`) and imported lazily.
+OpenAI-compatible endpoint via `OPENAI_BASE_URL`), `google` (Gemini), and
+`foundry` (Microsoft Foundry / Azure AI Foundry deployments). Each supplier
+implements the same `complete_json` contract; non-Anthropic SDKs are optional
+(`pip install -e ".[providers]"`) and imported lazily.
 
 Pick a provider + model per task in config (or the Config tab):
 
@@ -101,11 +102,14 @@ ai:
     dedup:          { model: claude-haiku-4-5 }         # lower-cost, Anthropic
     exploitability: { provider: openai, model: gpt-5 }  # different supplier
     threat_model:   { provider: google, model: gemini-2.5-pro }
+    enrichment:     { provider: foundry, model: my-deployment }  # Foundry deployment name
 ```
 
 Credentials come from the environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
-[+ `OPENAI_BASE_URL`], `GEMINI_API_KEY`). Adding a supplier is a new
-`LLMProvider` subclass registered in `providers/__init__.py`.
+[+ `OPENAI_BASE_URL`], `GEMINI_API_KEY`, `FOUNDRY_API_KEY` +
+`FOUNDRY_BASE_URL` [or their `AZURE_OPENAI_*` equivalents; add
+`FOUNDRY_API_VERSION` for classic Azure OpenAI endpoints]). Adding a supplier
+is a new `LLMProvider` subclass registered in `providers/__init__.py`.
 
 ## Model routing by task
 

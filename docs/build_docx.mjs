@@ -192,7 +192,7 @@ const children = [
     "Per-service scoping — chaining is scoped to a repo/service, which keeps requests tractable and chains meaningful.",
   ]),
   H2("5.5 Model routing + multi-provider harness (llm.py, providers/)"),
-  P("Every AI stage runs through a provider harness (providers/): each supplier — anthropic (native structured outputs, adaptive thinking, effort, Fable fallbacks), openai (and any OpenAI-compatible endpoint via OPENAI_BASE_URL), google (Gemini) — implements the same complete_json contract. Non-Anthropic SDKs are imported lazily, so they are optional deps. ModelRouter resolves a task to a ModelSpec (provider + model + effort + token budget) and LLMClient dispatches to the resolved supplier, so a task can run on any model from any supplier, set in config."),
+  P("Every AI stage runs through a provider harness (providers/): each supplier — anthropic (native structured outputs, adaptive thinking, effort, Fable fallbacks), openai (and any OpenAI-compatible endpoint via OPENAI_BASE_URL), google (Gemini), foundry (Microsoft Foundry / Azure AI Foundry deployments via FOUNDRY_BASE_URL + FOUNDRY_API_KEY, with FOUNDRY_API_VERSION for classic Azure OpenAI endpoints) — implements the same complete_json contract. Non-Anthropic SDKs are imported lazily, so they are optional deps. ModelRouter resolves a task to a ModelSpec (provider + model + effort + token budget) and LLMClient dispatches to the resolved supplier, so a task can run on any model from any supplier, set in config."),
   table(
     ["Task", "Default tier", "Rationale"],
     [

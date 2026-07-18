@@ -306,8 +306,10 @@ Design points:
 Every AI stage runs through a **provider harness** (`providers/`): each supplier
 — `anthropic` (native structured outputs, adaptive thinking, effort, Fable
 fallbacks), `openai` (and any OpenAI-compatible endpoint via `OPENAI_BASE_URL`),
-`google` (Gemini) — implements the same `complete_json(request) -> dict`
-contract. Non-Anthropic SDKs are imported lazily, so they're optional deps.
+`google` (Gemini), `foundry` (Microsoft Foundry / Azure AI Foundry deployments
+via `FOUNDRY_BASE_URL` + `FOUNDRY_API_KEY`, with `FOUNDRY_API_VERSION` for
+classic Azure OpenAI endpoints) — implements the same
+`complete_json(request) -> dict` contract. Non-Anthropic SDKs are imported lazily, so they're optional deps.
 `ModelRouter` resolves a task to a `ModelSpec(provider, model, effort,
 max_tokens)`, and `LLMClient` dispatches to the resolved supplier via the
 registry — so a task can run on any model from any supplier, set in config.

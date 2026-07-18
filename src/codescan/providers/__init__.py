@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from .anthropic_provider import AnthropicProvider
 from .base import CompletionRequest, LLMProvider, build_json_instruction, extract_json
+from .foundry_provider import FoundryProvider
 from .google_provider import GoogleProvider
 from .openai_provider import OpenAIProvider
 
@@ -16,6 +17,7 @@ _CLASSES: dict[str, type[LLMProvider]] = {
     "anthropic": AnthropicProvider,
     "openai": OpenAIProvider,
     "google": GoogleProvider,
+    "foundry": FoundryProvider,
 }
 _INSTANCES: dict[str, LLMProvider] = {}
 

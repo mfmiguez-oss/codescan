@@ -2,9 +2,9 @@
 
 codescan's AI stages (semantic dedup, exploitability, threat modeling, AI
 enrichment) go through an `LLMProvider`. Each supplier — Anthropic, OpenAI (and
-any OpenAI-compatible endpoint), Google — implements the same
-`complete_json(request) -> dict` contract, so a task can be routed to any model
-from any supplier via config (see `llm.py` / `ModelRouter`).
+any OpenAI-compatible endpoint), Google, Microsoft Foundry — implements the
+same `complete_json(request) -> dict` contract, so a task can be routed to any
+model from any supplier via config (see `llm.py` / `ModelRouter`).
 
 The Anthropic provider uses native structured outputs; other providers request
 JSON and parse defensively (`extract_json`), which keeps the adapters robust

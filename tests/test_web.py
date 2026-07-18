@@ -337,7 +337,7 @@ def test_ai_provider_config(tmp_path):
     client = _client(tmp_path)
     body = client.get("/api/config").json()
     assert body["ai"]["provider"] == "anthropic"
-    assert body["options"]["ai_providers"] == ["anthropic", "openai", "google"]
+    assert body["options"]["ai_providers"] == ["anthropic", "openai", "google", "foundry"]
 
     updated = client.post("/api/config", json={
         "ai": {"provider": "openai", "model": "gpt-5",
