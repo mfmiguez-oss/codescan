@@ -91,7 +91,7 @@ servicenow:
   password: ${SERVICENOW_PASSWORD}
   push: true                   # write findings straight into ServiceNow VR
   import_table: sn_vul_vulnerable_item
-  format: json
+  format: csv                  # on-disk artifact (push uses the Table API regardless)
 
 enrichment:
   kev_enabled: true

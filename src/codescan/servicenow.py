@@ -102,6 +102,16 @@ class ServiceNowExporter:
         ordered = sorted(findings, key=lambda f: f.risk_score, reverse=True)
         return [to_vulnerable_item(f, chains_by_id) for f in ordered]
 
+    def output_path(self, out_path: str | Path) -> Path:
+        """The file `export` actually writes for the configured format —
+        a `.csv` sibling for CSV (the default), else `out_path` as given."""
+        p = Path(out_path)
+        return p.with_suffix(".csv") if self._is_csv else p
+
+    @property
+    def _is_csv(self) -> bool:
+        return (self.cfg.format or "csv").lower() == "csv"
+
     def export(
         self,
         findings: list[Finding],
@@ -109,13 +119,12 @@ class ServiceNowExporter:
         out_path: str | Path,
     ) -> list[dict]:
         items = self.build(findings, chains)
+        dest = self.output_path(out_path)
 
-        if (self.cfg.format or "json").lower() == "csv":
-            # ServiceNow Import Sets accept CSV; write alongside as .csv.
-            self._write_csv(items, Path(out_path).with_suffix(".csv"))
+        if self._is_csv:
+            self._write_csv(items, dest)      # ServiceNow CSV Import Set transform
         else:
-            Path(out_path).write_text(
-                json.dumps({"records": items}, indent=2), encoding="utf-8")
+            dest.write_text(json.dumps({"records": items}, indent=2), encoding="utf-8")
 
         if self.cfg.push:
             self._push(items)

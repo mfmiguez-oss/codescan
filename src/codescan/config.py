@@ -155,7 +155,7 @@ class ServiceNowConfig(_StrictModel):
     password: str = ""
     push: bool = False
     import_table: str = "sn_vul_vulnerable_item"
-    format: str = "json"                # json | csv (Import Set / CSV transform)
+    format: str = "csv"                 # csv | json (CSV Import Set transform by default)
 
 
 class EnrichmentConfig(_StrictModel):

@@ -48,9 +48,8 @@ History stays linear; every commit on `main` passed the full gate.
 
 A behavior change updates, in the **same commit**:
 
-- `README.md`, `docs/DESIGN.md`, and `docs/DESIGN.docx` — the Word doc embeds its
-  own prose, so mirror edits into `docs/build_docx.mjs` and regenerate:
-  `node docs/build_docx.mjs`.
+- `README.md` and `docs/DESIGN.md` — mirror edits into the docs so text and
+  diagrams stay in sync.
 - `config/config.example.yaml` for any new setting, and the web **Config tab**
   (`src/codescan/static/index.html`) for any new toggle.
 - Diagram changes: edit `docs/architecture.svg` **and** `docs/make_diagram.py`

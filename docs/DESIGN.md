@@ -61,8 +61,8 @@ ServiceNow-ready records — with an analyst UI on top.
 
 ![codescan architecture](architecture.png)
 
-*Figure 1 — codescan pipeline architecture. Also available as [`architecture.svg`](architecture.svg)
-and in [`DESIGN.docx`](DESIGN.docx). Regenerate with `python docs/make_diagram.py`.*
+*Figure 1 — codescan pipeline architecture. Also available as [`architecture.svg`](architecture.svg).
+Regenerate with `python docs/make_diagram.py`.*
 
 ```mermaid
 flowchart TB
@@ -191,19 +191,27 @@ the SCA/CVE scanners never covered. There are three ways to produce them:
 built-in engine runs `openhack.passes` independent passes (default **2**) and
 **unions** the results — a vulnerability found in any pass is reported, so more
 passes miss fewer. Duplicates across passes are consolidated on
-(file, vulnerability class, title), keeping the strongest severity/confidence seen
-and recording cross-pass agreement: a finding seen in every pass is tagged
-`corroborated`, one seen once `single-pass`, with an "identified in N of M passes"
-note — a confidence signal that survives to the `Finding`.
+(file, vulnerability class), then clustered within that key by **title
+similarity** (`_titles_match`: token-set Jaccard ≥ 0.5, or near-total
+containment of the shorter title, over significant tokens with function-word and
+generic-security noise removed). This is what makes cross-*model* agreement
+count: different families word the same weakness differently ("Path Traversal
+Vulnerability" vs. "path traversal in the bash extractor"), so an exact-title key
+under-counted it; the similarity match is deliberately conservative, since a
+false merge would fabricate corroboration. Each cluster keeps the strongest
+severity/confidence seen and the set of **distinct passes** (not raw
+occurrences) that reported it: seen in every pass → `corroborated`, once →
+`single-pass`, with an "identified in N of M passes" note that survives to the
+`Finding`.
 
 **Different models per pass.** `openhack.pass_models` routes each pass to its own
 model (pass *i* → `pass_models[i % len]`, unset fields inheriting the
 `openhack` tier, via `LLMClient.resolve_spec` / `ModelRouter.override`). Different
 model families have different blind spots, so diverse passes make the union broader
 and the agreement more meaningful — a finding confirmed by ≥2 models earns a
-`multi-model` tag. Each pass is isolated: a failing model deployment is
-logged and skipped, and the union still benefits from the passes that ran. Fixtures
-under `fixtures/` drive the default UI and the test suite.
+`multi-model` tag (the note names them). Each pass is isolated: a failing model
+deployment is logged and skipped, and the union still benefits from the passes
+that ran. Fixtures under `fixtures/` drive the default UI and the test suite.
 
 **Repo source is pluggable.** The repo inventory comes from either Bitbucket
 Data Center (`bitbucket.py`) or GitHub / GitHub Enterprise Server (`github.py`),
@@ -521,11 +529,14 @@ carrying the composite score, risk rating, validation state, and — critically 
 the exploitability rationale and attack-chain context in the work notes, so a
 responder sees *why* the tool ranked it. `correlation_id` is the fingerprint,
 making the import idempotent: re-runs upsert the same item instead of creating
-duplicates, and closed items stay closed. Output is written to a file — **JSON**
-(`servicenow_import.json`) or, when `servicenow.format: csv`, a **CSV**
-(`servicenow_import.csv`) for CSV Import Sets (multi-line work notes are quoted
-correctly) — or POSTed to the configured import table via the Table API. The
-format is settable in config, the config UI, or with `--sn-format` on the CLI.
+duplicates, and closed items stay closed. Output is written to a file — by
+default a **CSV** (`servicenow_import.csv`) for CSV Import Sets (multi-line work
+notes are quoted correctly), or **JSON** (`servicenow_import.json`) when
+`servicenow.format: json` — or POSTed to the configured import table via the
+Table API. The format is settable in config, the config UI, or with
+`--sn-format` on the CLI; `ServiceNowExporter.output_path` resolves the actual
+filename (a CSV out path gets the `.csv` suffix) so the CLI reports where it
+really wrote.
 
 ### 5.9 Web UI (`web.py` + `static/index.html`)
 

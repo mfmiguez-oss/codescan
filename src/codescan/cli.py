@@ -72,6 +72,8 @@ def scan(
         fixtures = None
     pipeline = Pipeline(cfg, offline=offline, use_ai=not no_ai)
     result = pipeline.run(fixtures=fixtures, out_path=out, state_path=state)
+    from .servicenow import ServiceNowExporter
+    written = ServiceNowExporter(cfg.servicenow).output_path(out)
 
     summary = result.summary()
     console.print(f"[bold]codescan[/bold]: {summary['findings']} findings across "
@@ -91,7 +93,7 @@ def scan(
         for chain in result.chains:
             _print_chain(chain)
 
-    console.print(f"\nServiceNow import written to [green]{out}[/green]")
+    console.print(f"\nServiceNow import written to [green]{written}[/green]")
 
 
 @app.command()
@@ -174,14 +176,36 @@ def calibration(
                           f"{k['confirmed']} confirmed ({k['fp_rate']:.0%} FP rate)")
 
 
+def _read_import_records(out: str) -> list[dict]:
+    """Load records from a ServiceNow import file (JSON or CSV).
+
+    Resolves the given path, or its `.csv`/`.json` sibling when the exact one is
+    absent — so `summary` works whether the scan wrote CSV (the default) or JSON.
+    """
+    import csv
+
+    path = Path(out)
+    if not path.exists():
+        for alt in (path.with_suffix(".csv"), path.with_suffix(".json")):
+            if alt.exists():
+                path = alt
+                break
+        else:
+            raise typer.BadParameter(f"no import file at {out} (nor its .csv/.json sibling)")
+    if path.suffix.lower() == ".csv":
+        return list(csv.DictReader(path.open(encoding="utf-8")))
+    return json.loads(path.read_text(encoding="utf-8")).get("records", [])
+
+
 @app.command()
 def summary(out: str = typer.Option("servicenow_import.json")) -> None:
-    """Print a summary of an existing ServiceNow import file."""
-    records = json.loads(Path(out).read_text(encoding="utf-8")).get("records", [])
+    """Print a summary of an existing ServiceNow import file (JSON or CSV)."""
+    records = _read_import_records(out)
     console.print(f"{len(records)} vulnerable items")
     for r in records[:20]:
-        console.print(f"  {r['risk_score']:>5} {r['risk_rating']:<8} "
-                      f"{r['state']:<22} {r['short_description'][:60]}")
+        score = float(r.get("risk_score") or 0)
+        console.print(f"  {score:>5.0f} {r.get('risk_rating', ''):<8} "
+                      f"{r.get('state', ''):<22} {(r.get('short_description') or '')[:60]}")
 
 
 if __name__ == "__main__":

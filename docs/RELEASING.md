@@ -14,8 +14,7 @@ in [GOVERNANCE.md](GOVERNANCE.md) §3–§4.
    pytest -q                 # offline, deterministic, no API keys
    ```
 3. **Docs in lockstep.** A behavior change updates, in the same commit:
-   `README.md`, `docs/DESIGN.md`, `docs/DESIGN.docx` (regenerate via
-   `node docs/build_docx.mjs` — it embeds its own prose; mirror edits there),
+   `README.md` and `docs/DESIGN.md` — mirror edits there.
    `config/config.example.yaml` for new settings, and the web Config tab for
    new toggles. Diagram changes edit `docs/architecture.svg` **and**
    `docs/make_diagram.py`, then regenerate the PNG (`python docs/make_diagram.py`).

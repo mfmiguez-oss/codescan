@@ -126,6 +126,43 @@ def test_passes_route_to_different_models(tmp_path):
     assert "claude-opus-4-8, gpt-5" in f.description
 
 
+def test_cross_model_agreement_merges_similar_titles(tmp_path):
+    repo = _repo_tree(tmp_path / "repo")
+    # The same weakness (path traversal, same file) worded very differently by
+    # two model families must collapse into one corroborated, multi-model finding
+    # — an exact-title key would have counted them as two single-pass findings.
+    terse = _cand("Path Traversal Vulnerability", cls="path-traversal")
+    verbose = _cand("Path traversal in the bash extractor lets attackers read files",
+                    cls="path-traversal")
+    llm = FakeLLM(findings=None, per_call=[[terse], [verbose]])
+    cfg = OpenHackConfig(passes=2, pass_models=[
+        TaskModel(model="claude-opus-4-8"),
+        TaskModel(model="gpt-5"),
+    ])
+    out_dir = OpenHackEngine(llm, cfg).review(repo, tmp_path / "out", "a/b")
+
+    findings = OpenHackConnector().from_dir(out_dir, "a/b")
+    assert len(findings) == 1
+    f = findings[0]
+    assert "multi-model" in f.tags and "corroborated" in f.tags
+    assert "2 of 2" in f.description
+    assert "claude-opus-4-8, gpt-5" in f.description
+
+
+def test_distinct_same_class_findings_stay_separate(tmp_path):
+    repo = _repo_tree(tmp_path / "repo")
+    # Two genuinely different path-traversal issues in the same file must NOT be
+    # merged — false corroboration would be worse than under-counting.
+    a = _cand("Backup restore follows symlinks to overwrite arbitrary files", cls="path-traversal")
+    b = _cand("Cache cleanup deletes files outside the cache directory", cls="path-traversal")
+    llm = FakeLLM(findings=None, per_call=[[a, b], [a, b]])
+    cfg = OpenHackConfig(passes=2)
+    out_dir = OpenHackEngine(llm, cfg).review(repo, tmp_path / "out", "a/b")
+
+    titles = {f.title for f in OpenHackConnector().from_dir(out_dir, "a/b")}
+    assert titles == {a["title"], b["title"]}
+
+
 def test_failing_pass_is_isolated(tmp_path):
     repo = _repo_tree(tmp_path / "repo")
 

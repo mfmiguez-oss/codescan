@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 
 from .config import OpenHackConfig
@@ -52,6 +53,47 @@ _DEFAULT_SKIP_DIRS = frozenset({
 # Orderings for cross-pass consolidation (keep the strongest signal seen).
 _SEV_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "informational": 0, "info": 0, "unknown": 0}
 _CONF_RANK = {"high": 2, "medium": 1, "low": 0}
+
+# Cross-pass consolidation keys on file + vulnerability class, then clusters by
+# title similarity — different model families word the same weakness differently,
+# so an exact-title key under-counted cross-model agreement. These stopwords
+# (function words + generic security noise) are dropped before comparing titles
+# so "Path Traversal Vulnerability" and "path traversal in the bash extractor"
+# match on {path, traversal}.
+_TITLE_STOP = frozenset({
+    "a", "an", "the", "and", "or", "of", "to", "in", "on", "for", "with",
+    "without", "via", "is", "are", "be", "can", "could", "may", "that", "this",
+    "it", "its", "into", "from", "by", "as", "at", "not", "no", "do", "does",
+    "when", "which", "if", "but", "over", "under", "using", "due",
+    "vulnerability", "vuln", "issue", "issues", "insecure", "unsafe",
+    "potential", "possible", "security", "flaw", "weakness", "risk", "allows",
+    "allow", "enables", "enable", "leads", "causes", "cause",
+})
+
+
+def _title_tokens(title: str) -> frozenset[str]:
+    """Significant lowercase word tokens of a finding title (stopwords dropped)."""
+    words = re.split(r"[^a-z0-9]+", (title or "").lower())
+    return frozenset(w for w in words if len(w) > 1 and w not in _TITLE_STOP)
+
+
+def _titles_match(a: frozenset[str], b: frozenset[str]) -> bool:
+    """Whether two token sets describe the same finding.
+
+    Deliberately conservative — over-merging distinct same-class findings would
+    fabricate cross-model 'corroboration'. Matches on either a Jaccard overlap
+    of >= 0.5, or near-total containment of the smaller set (a terse title that
+    is essentially a subset of a descriptive one).
+    """
+    if not a or not b:
+        return a == b
+    inter = len(a & b)
+    if inter == 0:
+        return False
+    if inter / len(a | b) >= 0.5:
+        return True
+    smaller = a if len(a) <= len(b) else b
+    return len(smaller) >= 2 and inter / len(smaller) >= 0.8
 
 _PRIORITY_HINTS = (
     "auth", "login", "session", "token", "password", "crypto", "secret",
@@ -164,14 +206,16 @@ class OpenHackEngine:
 
         files = self._select_files(root)
         passes = max(1, self.cfg.passes)
-        consolidated: dict[tuple[str, str, str], dict] = {}
+        # (path, vuln-class) -> list of clusters; each cluster groups findings
+        # whose titles describe the same weakness across passes.
+        consolidated: dict[tuple[str, str], list[dict]] = {}
         for pass_idx in range(passes):
             spec = self._pass_spec(pass_idx)
             try:
                 for batch in self._batches(files, root):
                     result = self._review_batch(batch, repo or root.name, spec)
                     for finding in result.get("findings", []):
-                        self._merge(consolidated, finding, spec.model)
+                        self._merge(consolidated, finding, spec.model, pass_idx)
             except Exception as exc:  # noqa: BLE001 - isolate a failing pass/model
                 logger.warning("OpenHack pass %d (%s/%s) failed: %s",
                                pass_idx + 1, spec.provider, spec.model, exc)
@@ -249,45 +293,53 @@ class OpenHackEngine:
         return self.llm.complete_json(self.TASK, _SYSTEM, user, _SCHEMA, spec=spec)
 
     # --- cross-pass consolidation ----------------------------------------
-    def _merge(self, acc: dict[tuple[str, str, str], dict], f: dict, model: str) -> None:
-        """Fold one raw finding into the consolidation map, keyed on identity.
+    def _merge(self, acc: dict[tuple[str, str], list[dict]], f: dict,
+               model: str, pass_idx: int) -> None:
+        """Fold one raw finding into the consolidation map.
 
-        Same weakness in the same file (path + vulnerability class + title) reported
-        across passes collapses into one entry; distinct titles stay separate (union
-        favors recall). Keeps the strongest severity/confidence seen and records how
-        many passes — and which models — reported it.
+        Keyed on file + vulnerability class; within a key, findings whose titles
+        describe the same weakness (`_titles_match`) collapse into one cluster —
+        so the same issue worded differently by two model families counts as
+        agreement, while genuinely distinct same-class findings stay separate.
+        Records the **distinct passes** and models that reported each cluster
+        (not raw occurrences), and keeps the strongest severity/confidence seen.
         """
         path = f.get("target_path", "") or ""
-        vclass = (f.get("primary_vulnerability_class") or "unknown")
-        title = f.get("title", "OpenHack finding")
-        key = (path, vclass.lower(), title.strip().lower())
-        cur = acc.get(key)
-        if cur is None:
-            acc[key] = {"finding": dict(f), "passes": 1, "models": {model}}
-            return
-        cur["passes"] += 1
-        cur["models"].add(model)
-        best = cur["finding"]
-        if _SEV_RANK.get((f.get("severity") or "").lower(), 0) > _SEV_RANK.get((best.get("severity") or "").lower(), 0):
-            best["severity"] = f.get("severity")
-        if _CONF_RANK.get((f.get("confidence") or "").lower(), 0) > _CONF_RANK.get((best.get("confidence") or "").lower(), 0):
-            best["confidence"] = f.get("confidence")
+        vclass = (f.get("primary_vulnerability_class") or "unknown").lower()
+        tokens = _title_tokens(f.get("title", "OpenHack finding"))
+        clusters = acc.setdefault((path, vclass), [])
+        for cur in clusters:
+            if _titles_match(tokens, cur["tokens"]):
+                cur["passes"].add(pass_idx)
+                cur["models"].add(model)
+                best = cur["finding"]
+                if _SEV_RANK.get((f.get("severity") or "").lower(), 0) > _SEV_RANK.get((best.get("severity") or "").lower(), 0):
+                    best["severity"] = f.get("severity")
+                if _CONF_RANK.get((f.get("confidence") or "").lower(), 0) > _CONF_RANK.get((best.get("confidence") or "").lower(), 0):
+                    best["confidence"] = f.get("confidence")
+                return
+        clusters.append({"finding": dict(f), "tokens": tokens,
+                         "passes": {pass_idx}, "models": {model}})
 
     # --- persistence: OpenHack finding-candidate envelope -----------------
-    def _write_candidates(self, fc_dir: Path, acc: dict[tuple[str, str, str], dict], passes: int) -> None:
+    def _write_candidates(self, fc_dir: Path, acc: dict[tuple[str, str], list[dict]], passes: int) -> None:
         threshold = _CONF_RANK.get(self.cfg.min_confidence.lower(), 0)
+        # Flatten to (sort-key, cluster); stable order -> deterministic ids.
+        entries = sorted(
+            ((key, cur) for key, clusters in acc.items() for cur in clusters),
+            key=lambda kc: (kc[0], (kc[1]["finding"].get("title") or "").lower()),
+        )
         n = 0
-        # Stable order (by key) -> deterministic candidate ids across runs.
-        for _, entry in sorted(acc.items()):
+        for _key, entry in entries:
             f = entry["finding"]
-            found = entry["passes"]
+            found = len(entry["passes"])
             if _CONF_RANK.get((f.get("confidence") or "low").lower(), 0) < threshold:
                 continue
             n += 1
             candidate_id = f"OH-{n:04d}"
             vclass = f.get("primary_vulnerability_class", "") or "unknown"
             summary = f.get("summary", "")
-            models = sorted(entry.get("models", set()))
+            models = sorted(entry["models"])
             tags = ["openhack"]
             if passes > 1:
                 model_note = f" (models: {', '.join(models)})" if len(models) > 1 else ""

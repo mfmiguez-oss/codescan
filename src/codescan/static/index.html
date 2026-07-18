@@ -764,7 +764,7 @@ function renderConfig() {
     </div>
     <div class="card">
       <h4>ServiceNow</h4>
-      <div class="formrow"><label>Output format</label>${sel('sn-format', ['json', 'csv'], sn.format || 'json')}</div>
+      <div class="formrow"><label>Output format</label>${sel('sn-format', ['csv', 'json'], sn.format || 'csv')} <span class="muted" style="font-size:12px">CSV Import Set (default) or JSON</span></div>
       <div class="formrow"><label>Push to instance</label><input type="checkbox" id="sn-push" ${sn.push ? 'checked' : ''}/></div>
       <div class="formrow ro"><label>Instance</label><span>${esc(sn.instance || '—')}</span></div>
       <div class="formrow ro"><label>Import table</label><span>${esc(sn.import_table)}</span></div>

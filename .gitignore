@@ -22,3 +22,6 @@ validation_state.json
 threat_models.json
 config.overrides.json
 .openhack/
+
+# Claude-specific files
+.claude/

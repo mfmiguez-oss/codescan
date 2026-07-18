@@ -463,8 +463,10 @@ def test_legacy_overrides_migrate_to_foundry(tmp_path):
 
 def test_servicenow_format_config(tmp_path):
     client = _client(tmp_path)
-    body = client.post("/api/config", json={"servicenow": {"format": "csv"}}).json()
-    assert body["servicenow"]["format"] == "csv"
+    # CSV is the default; JSON is selectable.
+    assert client.get("/api/config").json()["servicenow"]["format"] == "csv"
+    body = client.post("/api/config", json={"servicenow": {"format": "json"}}).json()
+    assert body["servicenow"]["format"] == "json"
     # Invalid format is rejected.
     assert client.post("/api/config", json={"servicenow": {"format": "xml"}}).status_code == 400
 

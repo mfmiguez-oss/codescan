@@ -11,22 +11,21 @@ every finding, tracks **validation states**, and emits records ready for import
 into **ServiceNow Vulnerability Response**.
 
 ```
-Bitbucket (repo inventory)
+Bitbucket/GitHub (repo inventory)
         │
    Snyk + Xray  ──►  normalize ──►  deduplicate ──►  enrich (KEV/EPSS/reachability)
                                                             │
-                                        AI exploitability & vulnerability chaining (Claude)
+                                        AI exploitability & vulnerability chaining (AI Model)
                                                             │
                                         composite risk scoring ──► validation states
                                                             │
                                         ServiceNow Vulnerable Item export
 ```
 
-For architecture, design decisions, and rationale, see **[docs/DESIGN.md](docs/DESIGN.md)**
-(or the Word edition [docs/DESIGN.docx](docs/DESIGN.docx)). The architecture
-diagram is in [docs/architecture.svg](docs/architecture.svg) /
+For architecture, design decisions, and rationale, see **[docs/DESIGN.md](docs/DESIGN.md)**.
+The architecture diagram is in [docs/architecture.svg](docs/architecture.svg) /
 [`.png`](docs/architecture.png) — regenerate the graphic with
-`python docs/make_diagram.py` and the Word doc with `node docs/build_docx.mjs`.
+`python docs/make_diagram.py`.
 
 Governance, security, and audit documentation:
 **[docs/DATAFLOW.md](docs/DATAFLOW.md)** (formal context/logical/physical DFDs
@@ -42,7 +41,7 @@ release procedure).
 
 | Requirement | Where it lives |
 |---|---|
-| Code in a local Bitbucket install | `connectors/bitbucket.py` — on-prem REST API builds the repo inventory (the scan surface). **GitHub/GHES** (`connectors/github.py`) is a selectable alternative via `source.provider`. |
+| Code in a local repository install | **Bitbucket** `connectors/bitbucket.py` — on-prem REST API builds the repo inventory (the scan surface). **GitHub/GHES** (`connectors/github.py`) is a selectable alternative via `source.provider`. |
 | Snyk + Xray available | `connectors/snyk.py`, `connectors/xray.py` — live API pull **or** offline export files, both normalized to one `Finding` model. Hadrian **OpenHack** (`connectors/openhack.py`) is a third, whitebox source-review findings source. |
 | Output ready for ServiceNow Vulnerabilities | `servicenow.py` — `sn_vul_vulnerable_item` records with risk score, state, and reasoning; idempotent via `correlation_id`. |
 | Validation states | `validation.py` + `models.py` — internal lifecycle (`new → under_investigation → confirmed / false_positive / risk_accepted / duplicate / resolved`) mapped to ServiceNow VR states, with a persistent **state store** so rescans never re-open closed items. |
@@ -446,8 +445,9 @@ codescan scan --config config/config.example.yaml
 
 Flags: `--no-ai` (deterministic only), `--offline` (skip KEV/EPSS network calls),
 `--out` (ServiceNow import path), `--state` (validation-state store path),
-`--sn-format json|csv` (write a CSV for ServiceNow CSV Import Sets instead of
-JSON — also settable in config/UI), `--repo owner/name` (scan specific GitHub
+`--sn-format csv|json` (output format — **CSV** for ServiceNow CSV Import Sets
+is the default; `json` for a JSON file — also settable in config/UI),
+`--repo owner/name` (scan specific GitHub
 repo(s); implies GitHub source + a live scan; repeatable), `--whitebox` (review
 the target repo's source with the built-in OpenHack AI engine; needs AI + git —
 the Docker image includes git — skips uncredentialed Snyk/Xray — see below).
@@ -542,8 +542,10 @@ tier; set `claude-fable-5` for the deepest review).
 pass can miss a real issue. The engine runs `openhack.passes` **independent review
 passes** (default **2**) and **unions** the results, so a vulnerability found in
 *any* pass is reported: more passes → fewer missed. Duplicate findings across
-passes are consolidated (keyed on file + vulnerability class + title), keeping the
-strongest severity/confidence seen and recording how many passes agreed. That
+passes are consolidated on file + vulnerability class, then grouped by **title
+similarity** (so the same weakness worded differently across passes still merges,
+while genuinely distinct same-class findings stay separate), keeping the strongest
+severity/confidence seen and recording how many **distinct passes** agreed. That
 agreement is a **confidence signal**: a finding seen in every pass is tagged
 `corroborated`, one seen in a single pass `single-pass`, and the count ("identified
 in 2 of 2 … passes") is noted on the finding. Set `passes: 1` for a single cheap
@@ -581,10 +583,11 @@ openhack:
 codescan runs your invocation and reads the resulting `finding-candidates/`.
 All of these fields are editable in the Config tab under **OpenHack**.
 
-Inspect a produced import file:
+Inspect a produced import file (CSV or JSON — it resolves the sibling if the
+exact path is absent):
 
 ```bash
-codescan summary --out servicenow_import.json
+codescan summary --out servicenow_import.csv
 ```
 
 ## Container deployment

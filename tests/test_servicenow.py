@@ -19,18 +19,15 @@ def _finding() -> Finding:
     ).ensure_id()
 
 
-def test_json_output_default(tmp_path):
-    ServiceNowExporter(ServiceNowConfig()).export([_finding()], [], tmp_path / "out.json")
-    assert (tmp_path / "out.json").exists()
-    assert not (tmp_path / "out.csv").exists()
-
-
-def test_csv_output(tmp_path):
-    items = ServiceNowExporter(ServiceNowConfig(format="csv")).export(
-        [_finding()], [], tmp_path / "out.json")
+def test_csv_output_is_the_default(tmp_path):
+    # CSV (ServiceNow CSV Import Set) is the default format — a `.json` out path
+    # is written as its `.csv` sibling, and no JSON is produced.
+    exporter = ServiceNowExporter(ServiceNowConfig())
+    items = exporter.export([_finding()], [], tmp_path / "out.json")
     csv_path = tmp_path / "out.csv"
     assert csv_path.exists()
-    assert not (tmp_path / "out.json").exists()     # csv mode doesn't also write json
+    assert not (tmp_path / "out.json").exists()
+    assert exporter.output_path(tmp_path / "out.json") == csv_path
 
     header = csv_path.read_text(encoding="utf-8").splitlines()[0]
     assert "correlation_id" in header and "risk_score" in header
@@ -40,6 +37,14 @@ def test_csv_output(tmp_path):
     assert len(rows) == len(items) == 1
     assert rows[0]["vulnerability"] == "CVE-2021-44228"
     assert "line one" in rows[0]["description"]
+
+
+def test_json_output_when_configured(tmp_path):
+    exporter = ServiceNowExporter(ServiceNowConfig(format="json"))
+    exporter.export([_finding()], [], tmp_path / "out.json")
+    assert (tmp_path / "out.json").exists()
+    assert not (tmp_path / "out.csv").exists()
+    assert exporter.output_path(tmp_path / "out.json") == tmp_path / "out.json"
 
 
 class _FakeHttp:
@@ -77,6 +82,6 @@ def test_push_isolates_record_failures(tmp_path, monkeypatch):
 
     monkeypatch.setattr("codescan.servicenow.HttpClient", lambda *a, **k: Boom())
     cfg = ServiceNowConfig(push=True, user="u", password="p")
-    # A failing push must not raise — the on-disk export still succeeds.
+    # A failing push must not raise — the on-disk export still succeeds (CSV default).
     ServiceNowExporter(cfg).export([_finding()], [], tmp_path / "out.json")
-    assert (tmp_path / "out.json").exists()
+    assert (tmp_path / "out.csv").exists()
