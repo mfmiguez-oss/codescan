@@ -3,17 +3,25 @@
 [![CI](https://github.com/mfmiguez-oss/codescan/actions/workflows/ci.yml/badge.svg)](https://github.com/mfmiguez-oss/codescan/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-An enterprise code-scanning pipeline that ingests vulnerability findings from
-**Snyk** and **JFrog Xray** across repositories in a **local Bitbucket**
-(Data Center/Server) install, deduplicates them, uses **Claude** to assess
-real-world exploitability and discover **multi-step attack chains**, scores
-every finding, tracks **validation states**, and emits records ready for import
-into **ServiceNow Vulnerability Response**.
+An enterprise vulnerability-triage pipeline. It ingests findings from **Snyk**
+and **JFrog Xray**, **SARIF** exports from any scanner (CodeQL, Semgrep, Trivy,
+…), **CycloneDX/SPDX SBOMs** (embedded VEX + OSV.dev matching), **GitHub
+Dependabot and secret-scanning alerts**, and its own built-in **whitebox
+source-review engine** — across a **Bitbucket** (Data Center/Server) or
+**GitHub/GHES** repo inventory. Findings are deduplicated and corroborated
+across sources, enriched with KEV/EPSS/reachability, and assessed by AI models
+on **Microsoft Foundry** (Claude / GPT / Mistral) for real-world
+exploitability, **multi-step attack chains**, and per-service **STRIDE threat
+models**. Every finding gets a composite risk score calibrated by the org's own
+analyst decisions, a tracked **validation state**, and a record ready for
+import into **ServiceNow Vulnerability Response** — all drivable from an
+analyst web UI with an append-only, SIEM-shippable audit trail.
 
 ```
 Bitbucket/GitHub (repo inventory)
         │
-   Snyk + Xray  ──►  normalize ──►  deduplicate ──►  enrich (KEV/EPSS/reachability)
+   Snyk + Xray + SARIF + SBOM/OSV
+   + GitHub alerts + whitebox  ──►  normalize ──►  deduplicate ──►  enrich (KEV/EPSS/reachability)
                                                             │
                                         AI exploitability & vulnerability chaining (AI Model)
                                                             │
@@ -21,6 +29,28 @@ Bitbucket/GitHub (repo inventory)
                                                             │
                                         ServiceNow Vulnerable Item export
 ```
+
+**At a glance:**
+
+- **Six findings sources, one model.** Snyk, Xray, SARIF (any scanner), SBOM
+  (CycloneDX/SPDX + OSV.dev), GitHub Dependabot / secret-scanning alerts, and
+  the built-in OpenHack whitebox engine — all normalized to one `Finding`,
+  deduplicated cross-scanner, with agreement surfaced as corroboration.
+- **Whitebox review with cross-model agreement.** The in-process engine reviews
+  first-party source over multiple passes routed to *different model families*;
+  a finding confirmed by ≥2 models is tagged `multi-model`.
+- **AI judgement, bounded and audited.** Exploitability + attack chains
+  (batched for resilience), STRIDE threat models with attack-surface diagrams,
+  semantic dedup, and remediation enrichment — every model call
+  schema-constrained, clamped, and treated as data, never instructions.
+  Deployment preflight pins model routing to what the Foundry resource actually
+  serves (substitutions audited) instead of 404ing mid-scan.
+- **A learning loop.** Analyst confirm/false-positive decisions feed the AI's
+  prompts, nudge future scores (evidence-weighted, time-decayed), and are
+  continuously graded — calibration drift raises audit events to the SIEM.
+- **Operable.** Web UI for triage/config/scans, CSV/JSON ServiceNow import (or
+  direct push), file/SQL state store, Vault secrets, rate limiting, Docker, and
+  an offline fixtures mode that runs the whole pipeline with zero credentials.
 
 For architecture, design decisions, and rationale, see **[docs/DESIGN.md](docs/DESIGN.md)**.
 The architecture diagram is in [docs/architecture.svg](docs/architecture.svg) /
@@ -42,8 +72,8 @@ release procedure).
 | Requirement | Where it lives |
 |---|---|
 | Code in a local repository install | **Bitbucket** `connectors/bitbucket.py` — on-prem REST API builds the repo inventory (the scan surface). **GitHub/GHES** (`connectors/github.py`) is a selectable alternative via `source.provider`. |
-| Snyk + Xray available | `connectors/snyk.py`, `connectors/xray.py` — live API pull **or** offline export files, both normalized to one `Finding` model. Hadrian **OpenHack** (`connectors/openhack.py`) is a third, whitebox source-review findings source. |
-| Output ready for ServiceNow Vulnerabilities | `servicenow.py` — `sn_vul_vulnerable_item` records with risk score, state, and reasoning; idempotent via `correlation_id`. |
+| Snyk + Xray available | `connectors/snyk.py`, `connectors/xray.py` — live API pull **or** offline export files, both normalized to one `Finding` model. Hadrian **OpenHack** (`connectors/openhack.py`) is a third, whitebox source-review findings source. **SARIF** (`connectors/sarif.py`) ingests exports from any SARIF-emitting scanner (CodeQL, Semgrep, Trivy, Checkov, Gitleaks, …), **SBOMs** (`connectors/sbom.py`) ingest CycloneDX/SPDX with embedded VEX plus OSV.dev matching, and **GitHub Dependabot / secret-scanning alerts** (`connectors/github_alerts.py`, opt-in) ride the GitHub token and inventory. |
+| Output ready for ServiceNow Vulnerabilities | `servicenow.py` — `sn_vul_vulnerable_item` records with risk score, state, and reasoning, plus fielded detail (severity, exploitability, reporting sources, remediation, file/line, tags) so VR filters and reports can use the signals directly; idempotent via `correlation_id`. |
 | Validation states | `validation.py` + `models.py` — internal lifecycle (`new → under_investigation → confirmed / false_positive / risk_accepted / duplicate / resolved`) mapped to ServiceNow VR states, with a persistent **state store** so rescans never re-open closed items. |
 | Deduplication | `dedup.py` — cross-scanner merge on a `(vuln id, component, repo)` fingerprint; keeps provenance from every scanner. |
 | Exploitability, incl. chaining, scored accordingly | `exploitability.py` (Claude) + `scoring.py` — per-finding exploitability and explicit attack chains feed a weighted composite score. |
@@ -155,7 +185,13 @@ is confident about.
 
 The pipeline is I/O-bound on model API calls, and each judgement-heavy stage
 (exploitability, threat modeling, AI enrichment, semantic dedup, OpenHack) issues
-**one request per repo/service**. Two levers keep large scans fast and affordable:
+**one request per repo/service** — except exploitability, where a service with
+more than `ai.exploitability_batch` findings (default 40) is **split into
+batches**: a single oversized request would hold one streaming connection for
+its entire generation (long enough for a provider to drop it) and lose the whole
+stage on any failure, while batches run concurrently and confine a failure to
+one slice. Chains form within a batch (same-file findings stay adjacent) and
+batch chain ids are namespaced. Two levers keep large scans fast and affordable:
 
 - **Concurrency (speed).** Those per-service requests are independent, so codescan
   runs up to `ai.max_concurrency` of them at once (default 4; also in the Config
@@ -193,6 +229,19 @@ The pipeline is I/O-bound on model API calls, and each judgement-heavy stage
   ai:
     auto_route: true          # silent per-call downgrade/upgrade by difficulty
   ```
+
+- **Deployment pinning (availability).** On by default (`ai.resolve_deployments`).
+  At scan start codescan asks the Foundry resource which model deployments it
+  actually serves and pins all routing to that list: a configured model that
+  isn't deployed — the default tier, a task route, an auto-route ladder rung, or
+  an OpenHack pass model — is substituted with its **nearest deployed family
+  member** (e.g. `claude-opus-4-8` → a deployed `claude-opus-4-7`), logged and
+  recorded as a `scan.model_remapped` audit event; a model with no deployed
+  family member fails the scan up front with the deployment list in the error.
+  Either way you find out at scan start, not as a 404 halfway through the AI
+  stages. If the deployment list can't be fetched (no credentials, blocked
+  endpoint), routing is left untouched. Toggle in the Config tab; set
+  `resolve_deployments: false` to always send configured names as-is.
 
 Prompt caching isn't used: the static system prompts are far below the model's
 minimum cacheable-prefix size and each request's payload differs, so a cache
@@ -376,7 +425,7 @@ An analyst triage dashboard ships with the tool:
 ```bash
 codescan serve                 # http://127.0.0.1:8000 — offline demo, no key needed
 codescan serve --ai            # enable AI exploitability/chaining (needs FOUNDRY_API_KEY)
-codescan serve --live          # scan Bitbucket/Snyk/Xray instead of fixtures
+codescan serve --live          # scan the configured live sources instead of fixtures
 ```
 
 The UI is a complete usage surface — no CLI needed. It opens on an **Overview**
@@ -389,7 +438,7 @@ composite risk), with filters (search, severity, state, repo, min risk) and
 signal badges (KEV, attack-chain membership, EPSS, reporting scanners).
 **Run scans from the UI**
 with the header's **Run scan** button and the **AI / offline / live** toggles —
-including on-demand **live** scans of Bitbucket/Snyk/Xray. To scan specific
+including on-demand **live** scans of every configured source. To scan specific
 **GitHub repositories**, list them in the header field (`owner/name`,
 comma-separated) — optionally with the **whitebox** toggle to also review their
 source with the built-in OpenHack engine (needs AI) — and run: the targeting is
@@ -421,10 +470,14 @@ score separation, and the noisiest weakness families (see
 [Score calibration](#score-calibration--measuring-scoring-accuracy)).
 
 A **Config** tab manages non-secret settings live: the **repo source**
-(Bitbucket/GitHub) and **GitHub repo/org targets**, the default AI tier, per-task
-model routing, enrichment toggles, the threat-modeling toggle, scoring weights,
-and the ServiceNow push flag/format. Secrets stay in the environment (shown
-masked, read-only). Edits apply to the next scan and persist to
+(Bitbucket/GitHub) and **GitHub repo/org targets**, the GitHub
+**Dependabot / secret-scanning alert** toggles, **SARIF** and **SBOM**
+ingestion paths, the default AI tier, per-task model routing, auto-route,
+deployment pinning, the exploitability batch size, the full **OpenHack**
+whitebox settings (passes, per-pass models, confidence gate), enrichment
+toggles, the threat-modeling toggle, feedback/calibration toggles, scoring
+weights, and the ServiceNow push flag/format. Secrets stay in the environment
+(shown masked, read-only). Edits apply to the next scan and persist to
 `config.overrides.json`.
 
 Backend is FastAPI (`web.py`); the frontend is a single dependency-free HTML page
@@ -445,8 +498,10 @@ codescan scan --fixtures fixtures --no-ai --offline
 codescan scan --fixtures fixtures            # AI on, KEV/EPSS enrichment on
 ```
 
-**Live** against Bitbucket + Snyk + Xray, pushing to ServiceNow — set the env
-vars in `.env`, set `servicenow.push: true` in the config, then:
+**Live** against the configured sources (Bitbucket/GitHub inventory; Snyk,
+Xray, GitHub alerts, SARIF/SBOM paths — whatever is wired up; unconfigured
+sources are skipped, not fatal), pushing to ServiceNow — set the env vars in
+`.env`, set `servicenow.push: true` in the config, then:
 
 ```bash
 codescan scan --config config/config.example.yaml
@@ -555,7 +610,9 @@ model/effort via the `openhack` task (defaults to the deep default tier; set
 pass can miss a real issue. The engine runs `openhack.passes` **independent review
 passes** (default **2**) and **unions** the results, so a vulnerability found in
 *any* pass is reported: more passes → fewer missed. Duplicate findings across
-passes are consolidated on file + vulnerability class, then grouped by **title
+passes are consolidated on file + **canonical vulnerability-class family** (models
+word the class itself differently — "supply chain / ci security" and "ci/cd
+supply-chain compromise" fold into one bucket), then grouped by **title
 similarity** (so the same weakness worded differently across passes still merges,
 while genuinely distinct same-class findings stay separate), keeping the strongest
 severity/confidence seen and recording how many **distinct passes** agreed. That
@@ -619,7 +676,7 @@ Everything is environment-driven (no rebuild to reconfigure):
 | Env var | Default | Purpose |
 |---|---|---|
 | `CODESCAN_AI` | `false` | Enable the AI stages (needs `FOUNDRY_API_KEY` + `FOUNDRY_RESOURCE`) |
-| `CODESCAN_LIVE` | `false` | Scan Bitbucket/Snyk/Xray instead of the bundled fixtures (needs creds) |
+| `CODESCAN_LIVE` | `false` | Scan the configured live sources instead of the bundled fixtures (needs creds) |
 | `CODESCAN_PORT` | `8000` | Listen port |
 | `CODESCAN_CONFIG` / `CODESCAN_FIXTURES` | baked-in | Override the config / fixtures paths |
 | `CODESCAN_API_TOKEN` | — | If set, `/api/*` requires this token (defense-in-depth; see below) |
@@ -734,7 +791,10 @@ sidecar.)
 
 **Tuning for scale/cost** (all in config or the Config tab): `ai.max_concurrency`
 (parallel per-service calls — latency), `ai.auto_route` (silent per-call tier
-selection — cost), `ai.tasks.{openhack,threat_model}` → Sonnet (route the
+selection — cost), `ai.resolve_deployments` (pin routing to the resource's actual
+deployments — availability), `ai.exploitability_batch` (findings per
+exploitability request — resilience on finding-heavy services),
+`ai.tasks.{openhack,threat_model}` → Sonnet (route the
 token-heavy stages cheaper), and `openhack.passes` (recall vs. cost of the whitebox
 review). See [Efficiency & cost](#efficiency--cost).
 
@@ -745,7 +805,8 @@ src/codescan/
   config.py            config loading with ${ENV} interpolation
   vault.py             optional HashiCorp Vault secret source (env injection)
   models.py            canonical Finding model + fingerprint + VR state map
-  connectors/          bitbucket / github (sources) · snyk / xray / openhack (findings)
+  connectors/          bitbucket / github (sources) · snyk / xray / openhack /
+                       sarif / sbom / github_alerts (findings)
   openhack_engine.py   built-in in-process whitebox source-review engine (deep tier)
   openhack_runner.py   auto-run OpenHack (built-in engine or external command)
   llm.py               model router (task -> tier) + shared structured client
@@ -762,7 +823,8 @@ src/codescan/
   static/index.html    analyst triage dashboard (single-page, no build)
   pipeline.py          orchestration
   cli.py               `codescan` CLI (scan / serve / summary)
-fixtures/              sample Snyk/Xray exports for the offline demo
+fixtures/              sample scanner exports for the offline demo (Snyk/Xray/
+                       OpenHack; SARIF + SBOM fixture files also supported)
 tests/                 offline pipeline tests (no network / key needed)
 ```
 

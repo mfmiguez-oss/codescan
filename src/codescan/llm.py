@@ -10,6 +10,7 @@ Claude Haiku, exploitability on Claude Opus, threat modeling on GPT or Mistral
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, replace
 from typing import NamedTuple
 
@@ -55,6 +56,41 @@ _MODEL_LADDER: tuple[str, ...] = (
 _DIFFICULTY_DELTA: dict[str, int] = {"low": -1, "normal": 0, "high": +1}
 
 
+def _version_key(name: str) -> list[tuple[int, int] | tuple[int, str]]:
+    """Natural-sort key: digit runs compare numerically, so 4-10 > 4-9."""
+    return [(1, int(t)) if t.isdigit() else (0, t)
+            for t in re.split(r"(\d+)", name.lower()) if t]
+
+
+# Claude family capability order for cross-family substitution (mirrors the
+# auto-route ladder); non-Claude names all rank equal below it.
+_FAMILY_RANK = {"haiku": 1, "sonnet": 2, "opus": 3, "fable": 4, "mythos": 5}
+
+
+def _capability_key(name: str) -> tuple:
+    rank = next((r for fam, r in _FAMILY_RANK.items() if fam in name.lower()), 0)
+    return (rank, _version_key(name))
+
+
+def nearest_deployment(model: str, deployed: list[str]) -> str | None:
+    """Closest deployed substitute for `model`, or None if its family is absent.
+
+    Walks family prefixes from most to least specific (claude-opus-4-8 →
+    claude-opus-4 → claude-opus → claude) and, at the first prefix any
+    deployment matches, returns the most capable match (Claude family rank,
+    then highest version). Matching is case-insensitive; a deployment counts
+    if its name starts with the prefix, so a requested `gpt-5` finds a
+    deployed `gpt-5.6-luna`.
+    """
+    parts = model.lower().split("-")
+    for n in range(len(parts), 0, -1):
+        prefix = "-".join(parts[:n])
+        matches = [d for d in deployed if d.lower().startswith(prefix)]
+        if matches:
+            return max(matches, key=_capability_key)
+    return None
+
+
 def auto_route(spec: ModelSpec, difficulty: str) -> ModelSpec:
     """Shift `spec` up/down the Claude ladder by difficulty; a no-op otherwise.
 
@@ -74,6 +110,23 @@ def auto_route(spec: ModelSpec, difficulty: str) -> ModelSpec:
 class ModelRouter:
     def __init__(self, cfg: AIConfig) -> None:
         self.cfg = cfg
+        self._deployed: list[str] | None = None   # None = no pinning
+        self._remap: dict[str, str] = {}          # configured -> deployed substitute
+
+    def set_deployments(self, deployed: list[str]) -> None:
+        """Pin routing to the provider's actual model deployments.
+
+        From then on every resolved spec is checked against the list: a model
+        that isn't deployed is substituted with its nearest deployed family
+        member (warned once, recorded in `remapped`), and a model whose family
+        isn't deployed at all raises — instead of a 404 mid-run.
+        """
+        self._deployed = list(deployed)
+
+    @property
+    def remapped(self) -> dict[str, str]:
+        """{configured model: deployed substitute} applied so far."""
+        return dict(self._remap)
 
     def resolve(self, task: str, difficulty: str | None = None) -> ModelSpec:
         default = ModelSpec(self.cfg.provider, self.cfg.model, self.cfg.effort, self.cfg.max_tokens)
@@ -91,18 +144,70 @@ class ModelRouter:
         # baseline; auto-route only moves relative to them.
         if self.cfg.auto_route and difficulty:
             spec = auto_route(spec, difficulty)
-        return spec
+        return self._pin(spec)
 
     def override(self, task: str, task_model: TaskModel) -> ModelSpec:
         """A task's baseline spec with a per-call override layered on (unset fields
         inherit the baseline). Used to route each OpenHack pass to its own model."""
         base = self.resolve(task)
-        return ModelSpec(
+        return self._pin(ModelSpec(
             task_model.provider or base.provider,
             task_model.model or base.model,
             task_model.effort or base.effort,
             task_model.max_tokens or base.max_tokens,
-        )
+        ))
+
+    def _pin(self, spec: ModelSpec) -> ModelSpec:
+        """Substitute an undeployed model with its nearest deployed family member."""
+        if self._deployed is None:
+            return spec
+        if any(d.lower() == spec.model.lower() for d in self._deployed):
+            return spec
+        sub = self._remap.get(spec.model)
+        if sub is None:
+            sub = nearest_deployment(spec.model, self._deployed)
+            if sub is None:
+                raise RuntimeError(
+                    f"model '{spec.model}' is not deployed on the Foundry resource "
+                    f"(deployed: {', '.join(self._deployed) or 'none'}). Deploy it, or "
+                    "point ai.model / ai.tasks / openhack.pass_models at a deployed model."
+                )
+            self._remap[spec.model] = sub
+            logger.warning("model '%s' is not deployed on the Foundry resource — "
+                           "substituting nearest family deployment '%s'", spec.model, sub)
+        return replace(spec, model=sub)
+
+
+def preflight_deployments(
+    client: LLMClient, pass_models: list[TaskModel] | None = None
+) -> dict[str, str]:
+    """Pin the client's routing to the models actually deployed on the resource.
+
+    Fetches the provider's deployment list once, then resolves every model the
+    run can use — the default tier, built-in and configured task tiers, the
+    auto-route ladder when enabled, and any OpenHack per-pass models — so an
+    undeployed model is substituted within its family (warned) or fails fast
+    here, not as a 404 mid-scan. Returns {configured: substituted}. A provider
+    that can't enumerate deployments (missing credentials, blocked endpoint)
+    leaves routing untouched.
+    """
+    router = client.router
+    try:
+        deployed = get_provider(router.cfg.provider).list_deployments()
+    except Exception as exc:  # noqa: BLE001 - preflight is advisory; inference may still work
+        logger.info("deployment preflight skipped: %s", exc)
+        return {}
+    router.set_deployments(deployed)
+    tasks = {"exploitability", "threat_model", "openhack", *_BUILTIN_TASKS, *router.cfg.tasks}
+    difficulties = ("low", "normal", "high") if router.cfg.auto_route else ("normal",)
+    for task in sorted(tasks):
+        for difficulty in difficulties:
+            router.resolve(task, difficulty)
+    for task_model in pass_models or []:
+        router.override("openhack", task_model)
+    logger.info("deployment preflight: pinned to %d deployment(s) on the resource; "
+                "%d model(s) remapped", len(deployed), len(router.remapped))
+    return router.remapped
 
 
 class LLMClient:

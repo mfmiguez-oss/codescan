@@ -18,14 +18,16 @@ flowchart LR
   AN(["Analyst / SOC"]) -->|"triage decisions, notes,<br/>chain confirm/dismiss, config edits"| CS
   CS -->|"dashboards, rationales,<br/>calibration report"| AN
 
-  SCM(["Bitbucket / GitHub"]) -->|"repo inventory<br/>+ source files, OpenHack only"| CS["codescan"]
+  SCM(["Bitbucket / GitHub"]) -->|"repo inventory<br/>+ source files, OpenHack only<br/>+ Dependabot / secret alerts, opt-in"| CS["codescan"]
   SNYK(["Snyk"]) -->|"SCA findings"| CS
   XRAY(["JFrog Xray"]) -->|"artifact findings"| CS
+  FILES(["SARIF / SBOM exports<br/>local files"]) -->|"scanner results,<br/>components + embedded VEX"| CS
   KEV(["CISA KEV"]) -->|"exploited-CVE catalog"| CS
   EPSS(["FIRST EPSS"]) -->|"exploit probabilities"| CS
+  OSV(["OSV.dev"]) -->|"known vulnerabilities<br/>for SBOM component purls"| CS
 
   CS -->|"finding metadata digests<br/>+ source excerpts, OpenHack only"| AI(["Microsoft Foundry:<br/>Claude / GPT / Mistral"])
-  AI -->|"structured assessments:<br/>scores, chains, threat models"| CS
+  AI -->|"structured assessments:<br/>scores, chains, threat models<br/>+ deployment list, preflight"| CS
 
   VLT(["HashiCorp Vault"]) -->|"secrets, at startup"| CS
   CS -->|"vulnerable items<br/>scores, states, rationales"| SN(["ServiceNow VR"])
@@ -91,12 +93,14 @@ flowchart LR
     FS[("state store: validation_state.json<br/>or Postgres via storage.dsn")]
     AUD[("audit.jsonl — append-only")]
     ART[("run artifacts: servicenow_import,<br/>threat_models.json, overrides")]
+    ING[("ingest files: SARIF /<br/>SBOM exports, sarif.paths + sbom.paths")]
     PRX["reverse proxy / SSO"]
     V[("Vault")]
     SIEMBOX["SIEM collector"]
     APP --- FS
     APP --- AUD
     APP --- ART
+    ING -->|"scanner results, components"| APP
     PRX -->|"identity header<br/>X-Remote-User"| APP
     V -->|"secrets at startup"| APP
     AUD -->|"syslog / HTTP HEC<br/>best-effort push"| SIEMBOX
@@ -117,13 +121,15 @@ flowchart LR
   subgraph public ["Trust boundary: public internet"]
     KEVSRC["CISA KEV"]
     EPSSSRC["FIRST EPSS"]
+    OSVSRC["OSV.dev"]
   end
 
-  APP -->|"token, read-only: repo list<br/>+ files, OpenHack only"| BB
+  APP -->|"token, read-only: repo list + files, OpenHack<br/>+ Dependabot / secret alerts, opt-in"| BB
   APP -->|"token, read-only: findings"| SK
   APP -->|"token, read-only: findings"| XR
   APP -->|"no auth, read-only:<br/>CVE ids only"| KEVSRC
   APP -->|"no auth, read-only:<br/>CVE ids only"| EPSSSRC
+  APP -->|"no auth, read-only:<br/>SBOM component purls only"| OSVSRC
   APP -->|"API key: finding METADATA digests, no source code<br/>exception: OpenHack sends selected first-party files"| ANT
   APP -->|"API key: same contract"| OAI
   APP -->|"basic auth, write to<br/>import table only"| SNOW
@@ -141,8 +147,12 @@ disable/route-to-approved-deployment options).
 
 | Boundary crossed | Data out | Data in | Control |
 |---|---|---|---|
-| → SaaS scanners/SCM | tokens (headers only) | findings, repo inventory, source (OpenHack) | read-only tokens, TLS |
-| → Microsoft Foundry | finding metadata digests, triage-history counts/notes; source files **only** when OpenHack enabled | structured JSON assessments | `--no-ai` / per-stage toggles, Azure region of the resource, bounded file limits |
-| → public enrichment | CVE identifiers only | KEV membership, EPSS scores | `--offline` skips entirely |
-| → ServiceNow | scored vulnerable items incl. rationales | import results | write scoped to import table, idempotent `correlation_id` |
+| → SaaS scanners/SCM | tokens (headers only) | findings, repo inventory, source (OpenHack), Dependabot + secret-scanning alerts (opt-in; **secret values never read**) | read-only tokens, TLS; alert sources off by default |
+| → Microsoft Foundry | finding metadata digests, triage-history counts/notes; source files **only** when OpenHack enabled | structured JSON assessments; deployment list (preflight, names only) | `--no-ai` / per-stage toggles, `ai.resolve_deployments` preflight (substitutions audited as `scan.model_remapped`), Azure region of the resource, bounded file limits |
+| → public enrichment | CVE identifiers only; SBOM component purls (OSV) | KEV membership, EPSS scores, OSV advisories | `--offline` skips entirely; `sbom.osv` toggle |
+| → ServiceNow | scored vulnerable items incl. rationales + fielded detail (severity, exploitability, sources, remediation, location) | import results | write scoped to import table, idempotent `correlation_id` |
 | → SIEM | audit events (actor, action, timestamps) | — | best-effort push; local file stays durable record |
+
+SARIF and SBOM ingestion is file-based and stays **inside** the org boundary —
+nothing about those files leaves it except the component purls sent to OSV.dev
+when `sbom.osv` matching is on.

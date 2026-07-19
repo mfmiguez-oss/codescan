@@ -25,14 +25,16 @@ from .audit import AuditLog
 from .calibration import calibration_report, drift_alerts
 from .config import Config
 from .connectors import (
-    BitbucketConnector, GitHubConnector, OpenHackConnector, SnykConnector, XrayConnector,
+    BitbucketConnector, DependabotConnector, GitHubConnector, OpenHackConnector,
+    SarifConnector, SbomConnector, SecretScanningConnector, SnykConnector,
+    XrayConnector,
 )
 from .dedup import deduplicate
 from .dedup_ai import SemanticDeduper
 from .enrich import build_enrichers, run_enrichment
 from .exploitability import ExploitabilityEngine
 from .feedback import TriageHistory, apply_feedback
-from .llm import LLMClient, ModelRouter
+from .llm import LLMClient, ModelRouter, preflight_deployments
 from .models import Finding, Repo, ThreatModel
 from .openhack_runner import OpenHackRunner
 from .scoring import Scorer
@@ -109,6 +111,21 @@ class Pipeline:
                 findings.extend(conn.fetch(repo_by_name))
             else:
                 logger.info("scan: %s not configured — skipping that source", name)
+        # GitHub-native alert sources (opt-in) ride the same token + inventory.
+        if self.cfg.source.provider == "github":
+            for alert_conn in (DependabotConnector(self.cfg.github),
+                               SecretScanningConnector(self.cfg.github)):
+                if alert_conn.configured:
+                    findings.extend(alert_conn.fetch(repos))
+        # SARIF exports from any scanner (CodeQL, Semgrep, Trivy, ...).
+        if self.cfg.sarif.paths:
+            default_repo = self.cfg.sarif.repo or (repos[0].full_name if repos else "sarif")
+            findings.extend(SarifConnector().from_paths(self.cfg.sarif.paths, default_repo))
+        # SBOMs (CycloneDX/SPDX): embedded vulnerabilities + OSV matching.
+        if self.cfg.sbom.paths:
+            default_repo = self.cfg.sbom.repo or (repos[0].full_name if repos else "sbom")
+            findings.extend(SbomConnector(self.cfg.sbom).from_paths(
+                self.cfg.sbom.paths, default_repo, offline=self.offline))
         # OpenHack whitebox findings — covers repos the SCA/CVE scanners missed.
         oh = self.cfg.openhack
         if oh.auto and repos:
@@ -131,7 +148,7 @@ class Pipeline:
         repos: dict[str, Repo] = {}
         snyk = SnykConnector(self.cfg.snyk)
         xray = XrayConnector(self.cfg.xray)
-        for path in sorted(fixtures.glob("*.json")):
+        for path in sorted([*fixtures.glob("*.json"), *fixtures.glob("*.sarif")]):
             stem = path.name
             repo_full = stem.split(".")[0].replace("__", "/")
             proj, _, slug = repo_full.partition("/")
@@ -143,6 +160,11 @@ class Pipeline:
                 findings.extend(xray.from_file(path, repo_full))
             elif ".openhack." in stem:
                 findings.extend(OpenHackConnector().from_file(path, repo_full))
+            elif ".sarif" in stem:
+                findings.extend(SarifConnector().from_file(path, repo_full))
+            elif ".cdx." in stem or ".spdx." in stem or ".sbom." in stem:
+                findings.extend(SbomConnector(self.cfg.sbom).from_file(
+                    path, repo_full, offline=True))     # fixtures stay offline
         return list(repos.values()), findings
 
     # --- run --------------------------------------------------------------
@@ -166,6 +188,15 @@ class Pipeline:
         # Build one shared LLM client + task router for every AI stage — up front,
         # so live ingest can hand it to the built-in OpenHack review engine.
         llm = LLMClient(ModelRouter(self.cfg.ai)) if self.use_ai else None
+
+        # Pin routing to the resource's actual deployments so an undeployed model
+        # (e.g. a default tier the resource doesn't serve) is substituted within
+        # its family or fails fast here — not as a 404 mid-run.
+        if llm and self.cfg.ai.resolve_deployments:
+            remapped = preflight_deployments(llm, self.cfg.openhack.pass_models)
+            if remapped:
+                audit.record("scan.model_remapped", actor=actor, run_id=run_id,
+                             models=remapped)
 
         with _stage(run_id, "ingest"):
             if fixtures:
@@ -209,7 +240,9 @@ class Pipeline:
                        if self.cfg.feedback.enabled and self.cfg.feedback.prompt_history
                        else None)
             with _stage(run_id, "exploitability"):
-                chains = ExploitabilityEngine(llm, history=history).assess(findings)  # deep tier
+                chains = ExploitabilityEngine(
+                    llm, history=history, batch=self.cfg.ai.exploitability_batch,
+                ).assess(findings)               # deep tier
             # Re-apply persisted analyst chain decisions (keyed by finding-set
             # fingerprint): a dismissed chain stays visible but stops counting.
             annotate_chain_states(chains, store)

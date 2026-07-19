@@ -14,13 +14,33 @@ from ..models import Repo
 from .base import HttpClient
 
 
+def github_http(cfg: GitHubConfig) -> HttpClient:
+    """An HttpClient with the GitHub REST headers (api.github.com and GHES)."""
+    http = HttpClient(cfg.api_url, cfg.token, verify_tls=cfg.verify_tls)
+    http.session.headers["Accept"] = "application/vnd.github+json"
+    http.session.headers["X-GitHub-Api-Version"] = "2022-11-28"
+    return http
+
+
+def github_paged(http: HttpClient, path: str, **params: object) -> list[dict]:
+    """Follow GitHub's page/per_page pagination."""
+    out: list[dict] = []
+    page = 1
+    while True:
+        data = http.get(path, params={"per_page": 100, "page": page, **params}).json()
+        if not isinstance(data, list) or not data:
+            break
+        out.extend(data)
+        if len(data) < 100:
+            break
+        page += 1
+    return out
+
+
 class GitHubConnector:
     def __init__(self, cfg: GitHubConfig) -> None:
         self.cfg = cfg
-        self.http = HttpClient(cfg.api_url, cfg.token, verify_tls=cfg.verify_tls)
-        # GitHub-specific headers (works for api.github.com and GHES).
-        self.http.session.headers["Accept"] = "application/vnd.github+json"
-        self.http.session.headers["X-GitHub-Api-Version"] = "2022-11-28"
+        self.http = github_http(cfg)
 
     def list_repos(self) -> list[Repo]:
         # Most specific scope wins: explicit repos, then orgs, then everything.
@@ -29,10 +49,10 @@ class GitHubConnector:
         if self.cfg.orgs:
             repos: list[Repo] = []
             for org in self.cfg.orgs:
-                repos.extend(self._to_repo(r) for r in self._paged(f"/orgs/{org}/repos"))
+                repos.extend(self._to_repo(r) for r in github_paged(self.http, f"/orgs/{org}/repos"))
             return repos
         # No repos/orgs configured: every repo the token can access.
-        return [self._to_repo(r) for r in self._paged("/user/repos")]
+        return [self._to_repo(r) for r in github_paged(self.http, "/user/repos")]
 
     def _get_repo(self, full_name: str) -> Repo:
         """Fetch a single 'owner/name' repo (GET /repos/{owner}/{name})."""
@@ -60,16 +80,3 @@ class GitHubConnector:
             default_branch=r.get("default_branch", "main"),
         )
 
-    def _paged(self, path: str) -> list[dict]:
-        """Follow GitHub's page/per_page pagination."""
-        out: list[dict] = []
-        page = 1
-        while True:
-            data = self.http.get(path, params={"per_page": 100, "page": page}).json()
-            if not isinstance(data, list) or not data:
-                break
-            out.extend(data)
-            if len(data) < 100:
-                break
-            page += 1
-        return out

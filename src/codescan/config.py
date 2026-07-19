@@ -62,6 +62,22 @@ class AIConfig(_StrictModel):
     # the operator's explicit opt-in. Only shifts Claude models on the ladder;
     # custom deployments and other model families are left exactly as configured.
     auto_route: bool = False
+    # Preflight the provider's deployment list at scan start and pin all model
+    # routing to it: a configured model that isn't deployed on the resource is
+    # substituted with its nearest deployed family member (logged + audited as
+    # `scan.model_remapped`), and one with no deployed family fails the scan up
+    # front — instead of 404ing mid-run. When the deployment list can't be
+    # fetched (no credentials, blocked endpoint) routing is left untouched.
+    # false = always send configured model names as-is.
+    resolve_deployments: bool = True
+    # Findings per exploitability/chaining request. A service whose finding group
+    # exceeds this is split into batches (chains form within a batch; group order
+    # keeps same-file findings adjacent, so related steps stay together). Bounds
+    # how long any single streaming request runs — one oversized live request
+    # (126 findings) held its connection ~34 minutes and was dropped by the
+    # provider, losing the whole stage — and confines a failure to one batch.
+    # 0 = unlimited (always one request per service).
+    exploitability_batch: int = 40
     # Route individual tasks to lower-cost or higher-capability models,
     # e.g. dedup -> Haiku, exploitability -> Opus/Fable. Built-in defaults live
     # in llm.py.
@@ -82,6 +98,11 @@ class GitHubConfig(_StrictModel):
     repos: list[str] = []                     # explicit "owner/name" repos
     orgs: list[str] = []                      # whole orgs (used when repos is empty)
     verify_tls: bool = True                   # empty repos+orgs = all the token can see
+    # GitHub-native alert sources (opt-in): pull each inventoried repo's open
+    # alerts as findings over the same token. A repo without the feature (or a
+    # token without the scope) is skipped, not fatal.
+    dependabot_alerts: bool = False           # SCA advisories; corroborates Snyk
+    secret_scanning_alerts: bool = False      # exposed credentials (value never copied)
 
     @field_validator("api_url")
     @classmethod
@@ -95,6 +116,31 @@ class SourceConfig(_StrictModel):
     """Which SCM provides the repo inventory (scan surface)."""
 
     provider: str = "bitbucket"               # bitbucket | github
+
+
+class SarifConfig(_StrictModel):
+    """Ingest SARIF exports from any scanner (CodeQL, Semgrep, Trivy, ...)."""
+
+    # Files and/or directories of *.sarif / *.sarif.json exports to ingest on
+    # every scan. A file named OWNER__name.sarif anchors to that repo; others
+    # use `repo` (empty = the first scanned repo).
+    paths: list[str] = []
+    repo: str = ""
+
+
+class SbomConfig(_StrictModel):
+    """Ingest CycloneDX / SPDX SBOMs as a findings source (see connectors/sbom.py)."""
+
+    # SBOM files, or directories of *.cdx.json / *.spdx.json / *.sbom.json.
+    # A file named OWNER__name.<ext> anchors to that repo; others use `repo`
+    # (empty = the first scanned repo).
+    paths: list[str] = []
+    repo: str = ""
+    # Match component purls against OSV.dev (free, no key) for known
+    # vulnerabilities. Embedded CycloneDX `vulnerabilities` are always ingested;
+    # OSV matching is additionally skipped on --offline scans.
+    osv: bool = True
+    osv_url: str = "https://api.osv.dev"
 
 
 class SnykConfig(_StrictModel):
@@ -313,6 +359,8 @@ class Config(_StrictModel):
     github: GitHubConfig = GitHubConfig()
     snyk: SnykConfig = SnykConfig()
     xray: XrayConfig = XrayConfig()
+    sarif: SarifConfig = SarifConfig()
+    sbom: SbomConfig = SbomConfig()
     openhack: OpenHackConfig = OpenHackConfig()
     servicenow: ServiceNowConfig = ServiceNowConfig()
     enrichment: EnrichmentConfig = EnrichmentConfig()

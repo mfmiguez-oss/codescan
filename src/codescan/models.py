@@ -102,6 +102,10 @@ class Source(str, Enum):
     snyk = "snyk"
     xray = "xray"
     openhack = "openhack"       # whitebox source review (Hadrian OpenHack)
+    sarif = "sarif"             # any SARIF-emitting scanner (CodeQL, Semgrep, Trivy, ...)
+    sbom = "sbom"               # CycloneDX/SPDX SBOM (embedded VEX or OSV-matched)
+    dependabot = "dependabot"   # GitHub Dependabot alerts (SCA)
+    secret_scanning = "secret-scanning"   # GitHub secret scanning alerts
 
 
 class ValidationState(str, Enum):

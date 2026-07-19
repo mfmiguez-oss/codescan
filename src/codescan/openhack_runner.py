@@ -94,8 +94,11 @@ class OpenHackRunner:
     @staticmethod
     def _git_clone(url: str, dest: Path) -> None:
         try:
+            # core.longpaths: a target repo can carry paths past Windows' 260-char
+            # limit (checkout would fail "Filename too long"); ignored elsewhere.
             proc = subprocess.run(
-                ["git", "clone", "--depth", "1", url, str(dest)],
+                ["git", "clone", "--depth", "1", "-c", "core.longpaths=true",
+                 url, str(dest)],
                 capture_output=True, text=True,
             )
         except FileNotFoundError as exc:

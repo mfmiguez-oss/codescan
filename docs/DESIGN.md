@@ -48,7 +48,7 @@ ServiceNow-ready records — with an analyst UI on top.
 | Requirement | Design element |
 |---|---|
 | Code in local Bitbucket | `connectors/bitbucket.py` — on-prem REST API builds the repo inventory (scan surface). GitHub/GHES (`connectors/github.py`) is a selectable alternative via `source.provider`. |
-| Snyk + Xray available | `connectors/snyk.py`, `connectors/xray.py` — live pull or offline export, normalized to one `Finding`. |
+| Snyk + Xray available | `connectors/snyk.py`, `connectors/xray.py` — live pull or offline export, normalized to one `Finding`. Plus SARIF exports (`connectors/sarif.py`) and opt-in GitHub Dependabot / secret-scanning alerts (`connectors/github_alerts.py`). |
 | Output for ServiceNow Vulnerabilities | `servicenow.py` — `sn_vul_vulnerable_item` records, idempotent via `correlation_id`. |
 | Validation states | `validation.py` + `models.py` — lifecycle + persistent state store + VR state mapping. |
 | Deduplication | `dedup.py` (deterministic) + `dedup_ai.py` (semantic, lower-cost tier). |
@@ -163,8 +163,36 @@ paging). Each connector has **two ingestion paths**:
 The offline path is not just for demos: it makes the whole pipeline runnable in
 CI, in tests, and against archived scan data with zero credentials.
 
-**Findings sources are also pluggable.** Beyond Snyk/Xray (SCA/CVE), a third
-source — **OpenHack** (`connectors/openhack.py`) — ingests whitebox
+**Findings sources are also pluggable.** Beyond Snyk/Xray (SCA/CVE), three more
+seams feed the same normalize → dedup → score → triage path:
+
+- **SARIF** (`connectors/sarif.py`, `sarif.paths` config): file-based ingestion
+  of SARIF 2.1.0 exports. Because nearly every modern scanner emits SARIF —
+  CodeQL, Semgrep, Trivy, Checkov, Gitleaks, Bandit, … — this one connector
+  onboards that whole ecosystem with no per-vendor work. Severity comes from
+  the GitHub-convention `security-severity` rule property (CVSS-like) when
+  present, else the SARIF `level`; CWE ids are parsed from rule tags. Fixtures
+  mode picks up `<repo>.sarif[.json]` files alongside the scanner exports.
+- **GitHub Dependabot alerts** (`connectors/github_alerts.py`,
+  `github.dependabot_alerts`, opt-in): each inventoried repo's open SCA
+  advisories over the same GitHub token — a natural corroboration partner for
+  Snyk in the cross-scanner dedup. A repo without the feature (or a token
+  without the scope) is skipped, not fatal.
+- **GitHub secret-scanning alerts** (`github.secret_scanning_alerts`, opt-in):
+  exposed credentials as findings — `critical` when the provider verified the
+  secret as still active, `high` otherwise (CWE-798). Only the secret's type
+  and location are read; **the secret value is never copied** into a finding.
+- **SBOMs** (`connectors/sbom.py`, `sbom.paths` config): CycloneDX and SPDX
+  JSON. Embedded CycloneDX `vulnerabilities` (VEX/VDR) are ingested directly —
+  fully offline — and component purls are matched against **OSV.dev** (free,
+  no account; one `querybatch` per SBOM plus one details fetch per distinct
+  vulnerability, skipped on `--offline`). SBOM findings carry CVE + component
+  name@version + repo, so cross-scanner dedup merges and corroborates them
+  with Snyk / Xray / Dependabot naturally — and it makes codescan useful
+  upstream of any scanner: a customer SBOM is enough to produce a triaged,
+  scored VR feed.
+
+The next source — **OpenHack** (`connectors/openhack.py`) — ingests whitebox
 source-review findings (`finding-candidates/*.json`). These are first-party source
 issues with no CVE (dedup keys on title + path); they carry severity, target path,
 description, remediation, and OWASP/CWE-class tags, and flow through the same
@@ -201,14 +229,20 @@ the SCA/CVE scanners never covered. There are three ways to produce them:
 built-in engine runs `openhack.passes` independent passes (default **2**) and
 **unions** the results — a vulnerability found in any pass is reported, so more
 passes miss fewer. Duplicates across passes are consolidated on
-(file, vulnerability class), then clustered within that key by **title
-similarity** (`_titles_match`: token-set Jaccard ≥ 0.5, or near-total
+(file, **canonical vulnerability-class family**), then clustered within that key
+by **title similarity** (`_titles_match`: token-set Jaccard ≥ 0.4, or high
 containment of the shorter title, over significant tokens with function-word and
-generic-security noise removed). This is what makes cross-*model* agreement
-count: different families word the same weakness differently ("Path Traversal
-Vulnerability" vs. "path traversal in the bash extractor"), so an exact-title key
-under-counted it; the similarity match is deliberately conservative, since a
-false merge would fabricate corroboration. Each cluster keeps the strongest
+generic-security noise removed and plurals lightly singularized). Both keys are
+built for cross-*model* agreement: model families word the class itself
+differently ("supply chain / ci security" vs. "ci/cd supply-chain compromise" —
+`_canonical_class` folds free-text wordings into one family so they can share a
+bucket at all) and word the same weakness differently ("Path Traversal
+Vulnerability" vs. "path traversal in the bash extractor"), so exact keys
+under-counted agreement; the similarity match stays deliberately conservative,
+since a false merge would fabricate corroboration, with its thresholds
+calibrated against a live 3-model run (every cross-model merge inspected was
+the same issue reworded; distinct same-file same-class findings stayed
+separate). Each cluster keeps the strongest
 severity/confidence seen and the set of **distinct passes** (not raw
 occurrences) that reported it: seen in every pass → `corroborated`, once →
 `single-pass`, with an "identified in N of M passes" note that survives to the
@@ -226,12 +260,15 @@ that ran. Fixtures under `fixtures/` drive the default UI and the test suite.
 **Measuring agreement (`openhack.debug_passes`, off by default).** Enabling this
 dumps every raw finding *before* consolidation to `<output_dir>/passes-raw.json`
 (pass index, model, path, class, title), so cross-model behaviour can be
-**measured** rather than guessed at. It earns its keep: on a real multi-family
-scan it showed the lack of corroboration was **not** a too-conservative title
-matcher (relaxing the threshold would have merged nothing) but one model
-contributing zero findings — the root cause the coverage-first prompt fix (§5.1
-above) then addressed. A per-pass finding count is also logged unconditionally,
-so a silent no-op model is visible in every run.
+**measured** rather than guessed at. It has earned its keep twice on real
+multi-family scans: first showing that zero corroboration was **not** a
+too-conservative title matcher but one model contributing zero findings (the
+root cause the coverage-first prompt fix, §5.1 above, addressed), then — with
+all models contributing — showing the consolidation keys themselves were the
+gate (free-text class wordings never sharing a bucket, titles reworded past the
+old thresholds), which drove the canonical class family + calibrated matcher
+above. A per-pass finding count is also logged unconditionally, so a silent
+no-op model is visible in every run.
 
 **Repo source is pluggable.** The repo inventory comes from either Bitbucket
 Data Center (`bitbucket.py`) or GitHub / GitHub Enterprise Server (`github.py`),
@@ -383,6 +420,22 @@ ladder — a custom deployment name or another model family is left exactly as
 configured — and clamps at both ends. Enabling it is the operator's explicit
 opt-in; thereafter it applies silently per call (`auto_route` in `llm.py`).
 
+**Deployment pinning (`ai.resolve_deployments`, on by default).** A Foundry
+resource serves a specific set of model deployments, and a configured model
+name that isn't among them 404s at request time — potentially deep into a
+scan's AI stages. So the pipeline preflights: at scan start
+(`preflight_deployments` in `llm.py`) it fetches the resource's deployment
+list (`FoundryProvider.list_deployments`) and pins the router to it, then
+eagerly resolves every model the run can use — the default tier, built-in and
+configured task tiers, the auto-route ladder rungs when enabled, and the
+OpenHack per-pass models. An undeployed model is substituted with its nearest
+deployed family member (`nearest_deployment`: longest family-prefix match,
+most capable first — Claude family rank, then highest version), logged once
+and recorded as a `scan.model_remapped` audit event; a model with no deployed
+family fails the scan up front with the deployment list in the error. When
+the list can't be fetched (no credentials, blocked endpoint) routing is left
+untouched — the preflight is advisory, inference may still work.
+
 **Fan-out (`complete_json_many`).** The judgement-heavy stages (exploitability,
 threat modeling, AI enrichment, semantic dedup) each build one request per
 repo/service and hand the list to `LLMClient.complete_json_many`, which owns the
@@ -391,6 +444,21 @@ fan-out and returns `{custom_id: result}`: bounded concurrency
 up to N at once, per-item failures isolated (logged and skipped), results
 applied in deterministic order. Latency-only: same requests, same cost, bounded
 to respect rate limits.
+
+**Exploitability batching (`ai.exploitability_batch`, default 40).** One request
+per service stops scaling when a service carries very many findings: a single
+oversized request holds one streaming connection for its whole generation (a
+live 126-finding request ran ~34 minutes before the provider dropped it, losing
+the entire stage) and any failure loses everything. A service group above the
+cap is split into batches of at most that many findings, each its own
+`complete_json_many` item: batches run concurrently, a dropped connection now
+costs one slice, and per-finding results are identical. Chains form within a
+batch — group order keeps same-file findings adjacent, so the steps of a
+plausible chain tend to land in the same request — and each batch's chain ids
+are namespaced (`p2-CH-1`) so they can't collide. Response validation is
+per-request: a batch's response can only annotate the findings it was asked
+about, and a chain left with no in-request findings is dropped as fabricated.
+`0` = unlimited (always one request per service).
 
 **No prompt caching (deliberate).** The static system prompts sit far below the
 model's minimum cacheable-prefix size and each request's payload differs, so a
@@ -547,7 +615,12 @@ Alerts also surface in the Calibration tab and the CLI report.
 Builds `sn_vul_vulnerable_item` records, highest-risk first (VR queue order),
 carrying the composite score, risk rating, validation state, and — critically —
 the exploitability rationale and attack-chain context in the work notes, so a
-responder sees *why* the tool ranked it. `correlation_id` is the fingerprint,
+responder sees *why* the tool ranked it. The judgement signals are also
+**fielded**, not just prose, so VR filters and reports can use them directly:
+scanner `severity`, `exploitability_level`/`exploitability_score`, `reachable`,
+`cvss_vector`, `reported_by` (corroborating sources), `tags`
+(corroborated/multi-model/…), `remediation`, `fixed_versions`,
+`threat_ids`, location down to `file`/`line`/`ecosystem`, and `first_seen`. `correlation_id` is the fingerprint,
 making the import idempotent: re-runs upsert the same item instead of creating
 duplicates, and closed items stay closed. Output is written to a file — by
 default a **CSV** (`servicenow_import.csv`) for CSV Import Sets (multi-line work
@@ -936,10 +1009,17 @@ clean gate and the package ships `py.typed`.
 `config/config.example.yaml` (secrets via `${ENV}`):
 
 - `ai` — default tier + per-task routing (`tasks.<name>`), plus `max_concurrency`
-  (bounded parallelism) and `auto_route` (silent adaptive tier selection). See
+  (bounded parallelism), `auto_route` (silent adaptive tier selection),
+  `resolve_deployments` (pin routing to the resource's actual deployments), and
+  `exploitability_batch` (findings per exploitability request). See
   `config/config.enterprise.yaml` for a Fable-5 enterprise profile.
-- `source` / `bitbucket` / `github` — repo inventory (scan surface), tokens, scoping, TLS.
+- `source` / `bitbucket` / `github` — repo inventory (scan surface), tokens,
+  scoping, TLS; `github.dependabot_alerts` / `github.secret_scanning_alerts`
+  turn on the GitHub-native alert sources.
 - `snyk` / `xray` — findings endpoints, tokens, TLS.
+- `sarif` — `paths` (SARIF files/dirs to ingest) + default `repo`.
+- `sbom` — `paths` (CycloneDX/SPDX files/dirs), default `repo`, `osv` matching
+  toggle + `osv_url`.
 - `openhack` — whitebox review: `enabled`/`findings_dir` (ingest), `auto`/`clone`/
   `command` (run), and built-in-engine tuning (`passes`, `pass_models` for
   per-pass suppliers, `max_files`, `max_file_bytes`, `min_confidence`).

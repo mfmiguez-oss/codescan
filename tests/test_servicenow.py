@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 
 from codescan.config import ServiceNowConfig
-from codescan.models import Component, Finding, Location, Source
+from codescan.models import Component, Finding, Location, Severity, Source
 from codescan.servicenow import ServiceNowExporter
 
 
@@ -37,6 +37,42 @@ def test_csv_output_is_the_default(tmp_path):
     assert len(rows) == len(items) == 1
     assert rows[0]["vulnerability"] == "CVE-2021-44228"
     assert "line one" in rows[0]["description"]
+
+
+def test_record_carries_fielded_detail(tmp_path):
+    # The judgement signals must be fielded (filterable in VR), not only prose
+    # in the work notes.
+    f = _finding()
+    f.severity = Severity.high
+    f.remediation = "Upgrade log4j to 2.17.1."
+    f.tags = ["sca", "corroborated"]
+    f.location.start_line = 12
+    f.component.ecosystem = "maven"
+    (item,) = ServiceNowExporter(ServiceNowConfig()).build([f], [])
+
+    assert item["severity"] == "high"
+    assert item["reported_by"] == "snyk"
+    assert item["exploitability_level"] == "info" and item["exploitability_score"] == 0.0
+    assert item["remediation"] == "Upgrade log4j to 2.17.1."
+    assert item["tags"] == "sca, corroborated"
+    assert item["line"] == 12 and item["ecosystem"] == "maven"
+    assert item["first_seen"]                     # ISO timestamp present
+    assert "Remediation: Upgrade log4j" in item["work_notes"]
+
+
+def test_csv_rows_have_no_blank_lines_between_them(tmp_path):
+    # The writer emits RFC 4180 \r\n row endings; the file must carry them
+    # unmodified. Text-mode newline translation on Windows would double them to
+    # \r\r\n — rendering a blank row after every record in Excel/ServiceNow.
+    ServiceNowExporter(ServiceNowConfig()).export(
+        [_finding(), _finding()], [], tmp_path / "out.json")
+
+    raw = (tmp_path / "out.csv").read_bytes()
+    assert b"\r\r\n" not in raw
+    assert raw.count(b"\r\n") == 3          # header + 2 records, nothing between
+    # And no parser-visible empty rows.
+    lines = raw.decode("utf-8").split("\r\n")
+    assert all(line for line in lines[:-1]) and lines[-1] == ""
 
 
 def test_json_output_when_configured(tmp_path):

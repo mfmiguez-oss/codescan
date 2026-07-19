@@ -72,6 +72,39 @@ def test_builtin_engine_used_when_no_command(tmp_path, monkeypatch):
     assert out_dir.endswith("checkout-openhack-out")
 
 
+def test_clone_enables_long_paths(tmp_path, monkeypatch):
+    # A target repo can carry paths past Windows' 260-char limit; the clone must
+    # set core.longpaths or the checkout fails "Filename too long" mid-scan.
+    captured = {}
+
+    class Proc:
+        returncode, stdout, stderr = 0, "", ""
+
+    def fake_run(cmd, **kw):
+        captured["cmd"] = cmd
+        Path(cmd[-1]).mkdir(parents=True, exist_ok=True)   # "cloned" working tree
+        return Proc()
+
+    monkeypatch.setattr(ohr.subprocess, "run", fake_run)
+
+    class FakeEngine:
+        def __init__(self, llm, cfg): ...
+        def review(self, rp, out_dir, repo):
+            return str(out_dir)
+
+    monkeypatch.setattr("codescan.openhack_engine.OpenHackEngine", FakeEngine)
+
+    cfg = OpenHackConfig(auto=True, clone=True, workspace=str(tmp_path), command=[])
+    repo = Repo(project_key="acme", slug="checkout", name="acme/checkout",
+                clone_url="https://github.com/acme/checkout.git")
+    OpenHackRunner(cfg, llm=object()).run(repo)
+
+    cmd = captured["cmd"]
+    assert cmd[:2] == ["git", "clone"]
+    assert "core.longpaths=true" in cmd
+    assert cmd[-2] == repo.clone_url
+
+
 def test_builtin_engine_requires_ai(tmp_path):
     # No command and no LLM (AI disabled) => actionable error, not a crash.
     (tmp_path / "checkout").mkdir()

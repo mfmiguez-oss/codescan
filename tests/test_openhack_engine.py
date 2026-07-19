@@ -149,6 +149,63 @@ def test_cross_model_agreement_merges_similar_titles(tmp_path):
     assert "claude-opus-4-8, gpt-5" in f.description
 
 
+def test_free_text_class_wordings_share_a_bucket(tmp_path):
+    repo = _repo_tree(tmp_path / "repo")
+    # Model families word the vulnerability class itself differently; the raw
+    # string used to be part of the consolidation key, making cross-model merges
+    # structurally impossible. The canonical family must bridge them.
+    # (Real pair from a live 3-model graphify run.)
+    opus = _cand("GitHub Actions pinned to mutable tags",
+                 cls="supply chain / ci security", path=".github/workflows/publish.yml")
+    gpt = _cand("Third-party GitHub Actions are referenced by mutable tags",
+                cls="ci/cd supply-chain compromise", path=".github/workflows/publish.yml")
+    llm = FakeLLM(findings=None, per_call=[[opus], [gpt]])
+    cfg = OpenHackConfig(passes=2, pass_models=[
+        TaskModel(model="claude-opus-4-8"), TaskModel(model="gpt-5")])
+    out_dir = OpenHackEngine(llm, cfg).review(repo, tmp_path / "out", "a/b")
+
+    findings = OpenHackConnector().from_dir(out_dir, "a/b")
+    assert len(findings) == 1
+    assert "multi-model" in findings[0].tags
+
+
+def test_cross_model_wording_gap_merges(tmp_path):
+    repo = _repo_tree(tmp_path / "repo")
+    # Same issue, fully reworded across model families — shares only the core
+    # nouns. Needs the singularized tokens + calibrated thresholds to merge.
+    # (Real pair from a live 3-model graphify run.)
+    opus = _cand("Untrusted entity labels interpolated into LLM prompt (prompt injection)",
+                 cls="prompt injection / untrusted input", path="graphify/dedup.py")
+    gpt = _cand("Opt-in LLM deduplication is vulnerable to prompt injection through entity labels",
+                cls="injection", path="graphify/dedup.py")
+    llm = FakeLLM(findings=None, per_call=[[opus], [gpt]])
+    cfg = OpenHackConfig(passes=2, pass_models=[
+        TaskModel(model="claude-opus-4-8"), TaskModel(model="gpt-5")])
+    out_dir = OpenHackEngine(llm, cfg).review(repo, tmp_path / "out", "a/b")
+
+    findings = OpenHackConnector().from_dir(out_dir, "a/b")
+    assert len(findings) == 1
+    assert "multi-model" in findings[0].tags
+
+
+def test_canonical_class_families():
+    from codescan.openhack_engine import _canonical_class
+
+    assert _canonical_class("supply chain / ci security") == "supply-chain"
+    assert _canonical_class("ci/cd supply-chain compromise") == "supply-chain"
+    assert _canonical_class("cross-site scripting (xss)") == "xss"
+    assert _canonical_class("denial of service / resource exhaustion") == "dos"
+    assert _canonical_class("algorithmic denial of service") == "dos"
+    assert _canonical_class("path traversal / arbitrary file read") == "path-traversal"
+    assert _canonical_class("arbitrary file overwrite / symlink attack") == "path-traversal"
+    # Specific injection kinds don't collapse into the generic family.
+    assert _canonical_class("sql injection") == "sql-injection"
+    assert _canonical_class("cross-site request forgery") == "csrf"
+    # Unmatched free text keys on itself (lowercased) rather than a wrong family.
+    assert _canonical_class("Network Policy Bypass") == "network policy bypass"
+    assert _canonical_class("") == "unknown"
+
+
 def test_distinct_same_class_findings_stay_separate(tmp_path):
     repo = _repo_tree(tmp_path / "repo")
     # Two genuinely different path-traversal issues in the same file must NOT be

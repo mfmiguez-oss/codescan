@@ -7,8 +7,9 @@ change/release procedure see [docs/RELEASING.md](docs/RELEASING.md).
 ## What this is
 
 codescan is a vulnerability-triage **pipeline**: it ingests findings from Snyk +
-Xray (and a built-in OpenHack whitebox engine) over a Bitbucket/GitHub repo
-inventory → dedup → enrich (KEV/EPSS/reachability) → AI exploitability + attack
+Xray, SARIF exports (any scanner), CycloneDX/SPDX SBOMs (embedded VEX + OSV.dev
+matching), GitHub Dependabot / secret-scanning alerts (opt-in), and a built-in
+OpenHack whitebox engine over a Bitbucket/GitHub repo inventory → dedup → enrich (KEV/EPSS/reachability) → AI exploitability + attack
 chains → composite score → validation states → ServiceNow export, with an
 analyst web UI. It is an **LLM application over hosted models** (Anthropic /
 OpenAI / Mistral model deployments, all served through Microsoft

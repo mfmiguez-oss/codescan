@@ -14,9 +14,15 @@ operators. **Everything a model sees, and everything a model returns, is data,
 never instructions.** Scanner findings (titles, descriptions, package names)
 originate from third-party feeds (CVE databases, dependency metadata) and are
 **partly attacker-influenceable** — a crafted CVE description or a malicious
-first-party dependency name can carry text into an LLM prompt. Model responses
-are likewise untrusted. The controls below enforce the data-not-instructions
-boundary on both sides.
+first-party dependency name can carry text into an LLM prompt. The same holds
+for ingested SARIF and SBOM files (attacker-authored rule/message/component
+text), OSV advisory content, and GitHub alert payloads. Model responses are likewise untrusted. The controls below
+enforce the data-not-instructions boundary on both sides.
+
+One source deserves a special note: the **secret-scanning connector** uses
+only a secret's *type and location* from the alert payload — the secret
+**value** field is deliberately never read, so it cannot reach a finding, an
+export, a log, or a model prompt.
 
 ## Threats
 

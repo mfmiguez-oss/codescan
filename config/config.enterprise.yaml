@@ -26,6 +26,11 @@ ai:
   max_tokens: 32000
   max_concurrency: 8           # larger estates: more per-service calls in flight
   auto_route: false            # deterministic tiers — auditable routing for enterprise
+  # Pin routing to the resource's actual deployments at scan start: a model
+  # named here that isn't deployed (e.g. Fable/Opus not yet provisioned) is
+  # substituted within its family (audited as scan.model_remapped) or fails
+  # fast — never a 404 mid-scan.
+  resolve_deployments: true
   tasks:
     dedup:          { model: claude-haiku-4-5, max_tokens: 8000 }   # mechanical -> cheap
     enrichment:     { model: claude-haiku-4-5 }                     # mechanical -> cheap

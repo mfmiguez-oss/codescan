@@ -53,12 +53,14 @@ def to_vulnerable_item(f: Finding, chains_by_id: dict[str, dict]) -> dict:
             f"  MITRE ATT&CK: {', '.join(c.get('mitre_attack', []))}\n"
         )
 
+    remediation_note = f"\nRemediation: {f.remediation}" if f.remediation else ""
     work_notes = (
         f"Composite risk score: {f.risk_score}/100 ({_risk_rating(f.risk_score)})\n"
         f"Reported by: {', '.join(s.value for s in f.merged_sources)}\n"
         f"CVSS: {f.cvss_score} ({f.cvss_vector or 'n/a'})\n"
         f"KEV: {ex.in_kev} | EPSS: {ex.epss} | reachable: {ex.reachable}\n"
         f"Exploitability ({ex.level.value}, {ex.score}/100): {ex.rationale}"
+        f"{remediation_note}"
         f"{chain_notes}"
     )
 
@@ -66,6 +68,7 @@ def to_vulnerable_item(f: Finding, chains_by_id: dict[str, dict]) -> dict:
         # Import-set / VI fields.
         "correlation_id": f.id,                         # idempotent upsert key
         "source": "codescan",
+        "reported_by": ", ".join(s.value for s in f.merged_sources),
         "vulnerability": (f.cve_ids[0] if f.cve_ids else f.title),
         "cve_ids": ", ".join(f.cve_ids),
         "cwe_ids": ", ".join(f.cwe_ids),
@@ -76,17 +79,30 @@ def to_vulnerable_item(f: Finding, chains_by_id: dict[str, dict]) -> dict:
         "risk_score": f.risk_score,
         "risk_rating": _risk_rating(f.risk_score),
         "risk_score_source": "codescan_composite",
+        # Severity and exploitability, as filterable fields (not only prose).
+        "severity": f.severity.value,
         "active_exploit": ex.in_kev,
         "epss_score": ex.epss,
         "cvss_base_score": f.cvss_score,
+        "cvss_vector": f.cvss_vector,
+        "exploitability_level": ex.level.value,
+        "exploitability_score": ex.score,
+        "reachable": ex.reachable,
         # Asset / location — VR reconciles these to CMDB CIs.
         "repository": f.location.repo,
         "file": f.location.path,
+        "line": f.location.start_line,
         "component": f.component.name,
         "component_version": f.component.version,
+        "ecosystem": f.component.ecosystem,
         "package_url": f.component.purl,
+        # Resolution and context.
         "fixed_versions": ", ".join(f.fixed_in),
+        "remediation": f.remediation[:1000],
+        "tags": ", ".join(f.tags),
         "attack_chain_ids": ", ".join(ex.chain_ids),
+        "threat_ids": ", ".join(ex.threat_ids),
+        "first_seen": f.first_seen.isoformat(),
         "work_notes": work_notes,
         "references": " ".join(f.references[:10]),
     }
@@ -132,7 +148,10 @@ class ServiceNowExporter:
 
     @staticmethod
     def _write_csv(items: list[dict], path: Path) -> None:
-        path.write_text(items_to_csv(items), encoding="utf-8")
+        # newline="": keep the writer's RFC 4180 \r\n row endings as-is. Text-mode
+        # translation on Windows would double them to \r\r\n — a blank row after
+        # every record in Excel/ServiceNow.
+        path.write_text(items_to_csv(items), encoding="utf-8", newline="")
 
     def _push(self, items: list[dict]) -> tuple[int, int]:
         """POST each record into the configured import table (Table API).

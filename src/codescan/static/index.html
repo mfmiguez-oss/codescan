@@ -723,7 +723,7 @@ function renderOverview() {
   $('#overviewView').innerHTML = `
     <div class="card">
       <h4>codescan — vulnerability triage</h4>
-      <p class="hint">Aggregates Snyk, Xray, and OpenHack whitebox-review findings across your repositories, uses AI to assess exploitability, multi-step attack chains, and per-service STRIDE threat models, scores and triages them, and produces a ServiceNow Vulnerability Response feed.</p>
+      <p class="hint">Aggregates Snyk, Xray, OpenHack whitebox-review, SARIF (any scanner), SBOM (CycloneDX/SPDX + OSV), and GitHub Dependabot / secret-scanning findings across your repositories, uses AI to assess exploitability, multi-step attack chains, and per-service STRIDE threat models, scores and triages them, and produces a ServiceNow Vulnerability Response feed.</p>
       <div class="chips">
         <span class="chip">source: <b>${esc(m.source || '—')}</b></span>
         <span class="chip">${m.use_ai ? 'AI on' : 'AI off'}</span>
@@ -820,6 +820,8 @@ function renderConfig() {
       <div class="formrow"><label>Max tokens</label><input type="number" id="ai-max" value="${c.ai.max_tokens}"/></div>
       <div class="formrow"><label>Max concurrency</label><input type="number" id="ai-conc" style="width:100px" value="${c.ai.max_concurrency ?? 4}"/> <span class="muted" style="font-size:12px">parallel per-service AI calls (latency only)</span></div>
       <div class="formrow"><label>Auto-route models</label><input type="checkbox" id="ai-auto" ${c.ai.auto_route ? 'checked' : ''}/> <span class="muted" style="font-size:12px">silently pick cheaper/stronger tier per call by difficulty (Haiku↔Sonnet↔Opus↔Fable)</span></div>
+      <div class="formrow"><label>Pin to deployments</label><input type="checkbox" id="ai-resolve" ${c.ai.resolve_deployments ? 'checked' : ''}/> <span class="muted" style="font-size:12px">preflight the resource's deployment list at scan start; substitute an undeployed model within its family (audited) or fail fast instead of 404 mid-scan</span></div>
+      <div class="formrow"><label>Exploitability batch</label><input type="number" id="ai-exbatch" style="width:100px" value="${c.ai.exploitability_batch ?? 40}"/> <span class="muted" style="font-size:12px">max findings per exploitability/chaining request; larger service groups split into batches (0 = unlimited)</span></div>
     </div>
     <div class="card">
       <h4>Model routing by task</h4>
@@ -863,6 +865,19 @@ function renderConfig() {
       <div class="formrow"><label>Debug passes</label><input type="checkbox" id="oh-debug" ${c.openhack.debug_passes ? 'checked' : ''}/> <span class="muted" style="font-size:12px">dump raw per-pass findings to passes-raw.json (measure cross-model agreement)</span></div>
     </div>
     <div class="card">
+      <h4>SARIF ingestion</h4>
+      <p class="hint">Ingest SARIF exports from any scanner (CodeQL, Semgrep, Trivy, Checkov, Gitleaks, …) on every scan. Point at <code>*.sarif</code> / <code>*.sarif.json</code> files or directories; a file named <code>OWNER__name.sarif</code> anchors to that repo.</p>
+      <div class="formrow"><label>Paths</label><input type="text" id="sarif-paths" style="width:420px" value="${esc((c.sarif.paths || []).join(', '))}" placeholder="results.sarif, sarif-exports/ — empty = disabled"/></div>
+      <div class="formrow"><label>Repo</label><input type="text" id="sarif-repo" style="width:360px" value="${esc(c.sarif.repo || '')}" placeholder="owner/name — empty = first scanned repo"/></div>
+    </div>
+    <div class="card">
+      <h4>SBOM ingestion</h4>
+      <p class="hint">Ingest CycloneDX / SPDX SBOMs on every scan: embedded vulnerabilities (VEX/VDR) directly, plus component matching against <a href="https://osv.dev" target="_blank" rel="noopener">OSV.dev</a> (free, no key; skipped on offline scans). A file named <code>OWNER__name.cdx.json</code> anchors to that repo.</p>
+      <div class="formrow"><label>Paths</label><input type="text" id="sbom-paths" style="width:420px" value="${esc((c.sbom.paths || []).join(', '))}" placeholder="bom.cdx.json, sboms/ — empty = disabled"/></div>
+      <div class="formrow"><label>Repo</label><input type="text" id="sbom-repo" style="width:360px" value="${esc(c.sbom.repo || '')}" placeholder="owner/name — empty = first scanned repo"/></div>
+      <div class="formrow"><label>OSV matching</label><input type="checkbox" id="sbom-osv" ${c.sbom.osv ? 'checked' : ''}/> <span class="muted" style="font-size:12px">match component purls against OSV.dev for known vulnerabilities</span></div>
+    </div>
+    <div class="card">
       <h4>Scoring weights</h4>
       <p class="hint">Blended into the 0–100 composite (auto-normalized). KEV floor overrides the blend.</p>
       <div class="formrow"><label>Severity</label>${wnum('w-sev', w.severity)}</div>
@@ -884,6 +899,8 @@ function renderConfig() {
       <div class="formrow"><label>Repo source</label>${sel('scm-provider', c.options.scm_providers, c.source.provider)}</div>
       <div class="formrow"><label>GitHub repos</label><input type="text" id="gh-repos" style="width:360px" value="${esc((c.source.github_repos || []).join(', '))}" placeholder="owner/name, owner/other — empty = orgs / all"/></div>
       <div class="formrow"><label>GitHub orgs</label><input type="text" id="gh-orgs" style="width:360px" value="${esc((c.source.github_orgs || []).join(', '))}" placeholder="org1, org2 — used when repos is empty"/></div>
+      <div class="formrow"><label>Dependabot alerts</label><input type="checkbox" id="gh-dependabot" ${c.source.dependabot_alerts ? 'checked' : ''}/> <span class="muted" style="font-size:12px">pull each repo's open Dependabot alerts as SCA findings (GitHub source; corroborates Snyk)</span></div>
+      <div class="formrow"><label>Secret scanning</label><input type="checkbox" id="gh-secrets" ${c.source.secret_scanning_alerts ? 'checked' : ''}/> <span class="muted" style="font-size:12px">pull open secret-scanning alerts as findings (secret values are never copied)</span></div>
       <div class="formrow ro"><label>Bitbucket URL</label><span>${esc(cn.bitbucket.base_url || '—')}</span></div>
       <div class="formrow ro"><label>Bitbucket token</label><span>${esc(cn.bitbucket.token || '(unset)')}</span></div>
       <div class="formrow ro"><label>GitHub URL</label><span>${esc(cn.github.api_url || '—')}</span></div>
@@ -905,13 +922,15 @@ async function saveConfig() {
     tasks[t] = { provider: $('#task-' + t + '-provider').value, model: $('#task-' + t + '-model').value, effort: $('#task-' + t + '-effort').value, max_tokens: numOrNull('task-' + t + '-max') };
   });
   const update = {
-    ai: { provider: $('#ai-provider').value, model: $('#ai-model').value, effort: $('#ai-effort').value, max_tokens: Number($('#ai-max').value), max_concurrency: Number($('#ai-conc').value), auto_route: $('#ai-auto').checked, tasks },
+    ai: { provider: $('#ai-provider').value, model: $('#ai-model').value, effort: $('#ai-effort').value, max_tokens: Number($('#ai-max').value), max_concurrency: Number($('#ai-conc').value), auto_route: $('#ai-auto').checked, resolve_deployments: $('#ai-resolve').checked, exploitability_batch: Number($('#ai-exbatch').value), tasks },
     enrichment: { kev_enabled: $('#en-kev').checked, epss_enabled: $('#en-epss').checked, reachability_enabled: $('#en-reach').checked, ai_enabled: $('#en-ai').checked },
     threat_model: { enabled: $('#tm-enabled').checked },
     feedback: { enabled: $('#fb-enabled').checked, prompt_history: $('#fb-prompt-history').checked },
     calibration: { alerts_enabled: $('#cal-alerts').checked },
     openhack: { enabled: $('#oh-enabled').checked, findings_dir: $('#oh-dir').value, repo: $('#oh-repo').value, auto: $('#oh-auto').checked, command: $('#oh-cmd').value, workspace: $('#oh-ws').value, clone: $('#oh-clone').checked, passes: Number($('#oh-passes').value), max_files: Number($('#oh-maxfiles').value), min_confidence: $('#oh-minconf').value, debug_passes: $('#oh-debug').checked },
-    source: { provider: $('#scm-provider').value, github_repos: splitList($('#gh-repos').value), github_orgs: splitList($('#gh-orgs').value) },
+    source: { provider: $('#scm-provider').value, github_repos: splitList($('#gh-repos').value), github_orgs: splitList($('#gh-orgs').value), dependabot_alerts: $('#gh-dependabot').checked, secret_scanning_alerts: $('#gh-secrets').checked },
+    sarif: { paths: splitList($('#sarif-paths').value), repo: $('#sarif-repo').value },
+    sbom: { paths: splitList($('#sbom-paths').value), repo: $('#sbom-repo').value, osv: $('#sbom-osv').checked },
     scoring: { weights: { severity: Number($('#w-sev').value), exploitability: Number($('#w-exp').value), exposure: Number($('#w-exposure').value), chaining: Number($('#w-chain').value) }, kev_floor: Number($('#kev-floor').value) },
     servicenow: { push: $('#sn-push').checked, format: $('#sn-format').value },
   };

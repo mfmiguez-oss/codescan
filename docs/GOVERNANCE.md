@@ -63,7 +63,7 @@ evidence and enforcement substrate that process plugs into:
 
 | Control element | What codescan provides |
 |---|---|
-| Formal recordkeeping | Git history (code), append-only audit log (runtime): `config.changed` events name the actor and every changed key; `validation.changed` / `chain.validation.changed` record triage with before/after and notes |
+| Formal recordkeeping | Git history (code), append-only audit log (runtime): `config.changed` events name the actor and every changed key; `validation.changed` / `chain.validation.changed` record triage with before/after and notes; `scan.model_remapped` records any deployment-pinning substitution, so the models that actually served a run are always on record |
 | System of record for runtime changes | `config.overrides.json` — every UI config edit persists there and survives restart |
 | Risk / impact identification | The full gate (ruff, mypy, tests) runs locally and in CI on every change; docs-in-lockstep convention keeps DESIGN.md/README current with behavior ([RELEASING.md](RELEASING.md)) |
 | Change monitoring / continuous auditing | Audit events fan out to SIEM sinks in near-real-time; `GET /api/audit` and the UI Audit tab expose the trail |

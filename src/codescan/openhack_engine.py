@@ -54,12 +54,50 @@ _DEFAULT_SKIP_DIRS = frozenset({
 _SEV_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "informational": 0, "info": 0, "unknown": 0}
 _CONF_RANK = {"high": 2, "medium": 1, "low": 0}
 
-# Cross-pass consolidation keys on file + vulnerability class, then clusters by
-# title similarity — different model families word the same weakness differently,
-# so an exact-title key under-counted cross-model agreement. These stopwords
-# (function words + generic security noise) are dropped before comparing titles
-# so "Path Traversal Vulnerability" and "path traversal in the bash extractor"
-# match on {path, traversal}.
+# Cross-pass consolidation keys on file + *canonical* vulnerability class, then
+# clusters by title similarity — different model families word the same weakness
+# differently, so exact class/title keys under-counted cross-model agreement.
+# The family table folds free-text class wordings ("supply chain / ci security",
+# "ci/cd supply-chain compromise") into one bucket; first matching family wins,
+# most specific first; unmatched wordings key on their own lowercase text.
+# Calibrated against a live 3-model run (Opus / GPT / Codestral over graphify).
+_CLASS_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("path-traversal", ("travers", "path handling", "path confinement",
+                        "arbitrary file", "symlink", "zip slip", "zipslip")),
+    ("xss", ("xss", "cross-site scripting", "cross site scripting")),
+    ("csrf", ("csrf", "cross-site request forgery")),
+    ("ssrf", ("ssrf", "request forgery")),
+    ("sql-injection", ("sql",)),
+    ("command-injection", ("command injection", "os command", "command execution")),
+    ("injection", ("injection",)),
+    ("dos", ("denial of service", "redos", "resource exhaustion",
+             "resource consumption", "backtracking", "(dos)")),
+    ("supply-chain", ("supply chain", "supply-chain", "ci/cd", "ci security", "workflow")),
+    ("secrets", ("secret", "credential", "hardcoded")),
+    ("info-disclosure", ("information disclosure", "data exposure",
+                         "information leak", "sensitive data")),
+    ("deserialization", ("deserial",)),
+    ("access-control", ("access control", "idor", "direct object reference",
+                        "authoriz", "privilege")),
+    ("open-redirect", ("open redirect",)),
+    ("crypto", ("cryptograph", "randomness", "certificate", "transport security",
+                "tls", "collision", "hash")),
+    ("upload", ("upload",)),
+)
+
+
+def _canonical_class(vclass: str) -> str:
+    """Fold a model's free-text vulnerability class into its canonical family."""
+    low = (vclass or "unknown").lower()
+    for family, needles in _CLASS_FAMILIES:
+        if any(n in low for n in needles):
+            return family
+    return low
+
+
+# These stopwords (function words + generic security noise) are dropped before
+# comparing titles so "Path Traversal Vulnerability" and "path traversal in the
+# bash extractor" match on {path, traversal}.
 _TITLE_STOP = frozenset({
     "a", "an", "the", "and", "or", "of", "to", "in", "on", "for", "with",
     "without", "via", "is", "are", "be", "can", "could", "may", "that", "this",
@@ -72,9 +110,21 @@ _TITLE_STOP = frozenset({
 
 
 def _title_tokens(title: str) -> frozenset[str]:
-    """Significant lowercase word tokens of a finding title (stopwords dropped)."""
+    """Significant lowercase word tokens of a finding title.
+
+    Stopwords are dropped and plural nouns lightly singularized ("globs" /
+    "glob", "symlinks" / "symlink") so wording variation across model families
+    doesn't split tokens that mean the same thing.
+    """
     words = re.split(r"[^a-z0-9]+", (title or "").lower())
-    return frozenset(w for w in words if len(w) > 1 and w not in _TITLE_STOP)
+    out = set()
+    for w in words:
+        if len(w) <= 1 or w in _TITLE_STOP:
+            continue
+        if len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+            w = w[:-1]
+        out.add(w)
+    return frozenset(out)
 
 
 def _titles_match(a: frozenset[str], b: frozenset[str]) -> bool:
@@ -82,18 +132,22 @@ def _titles_match(a: frozenset[str], b: frozenset[str]) -> bool:
 
     Deliberately conservative — over-merging distinct same-class findings would
     fabricate cross-model 'corroboration'. Matches on either a Jaccard overlap
-    of >= 0.5, or near-total containment of the smaller set (a terse title that
-    is essentially a subset of a descriptive one).
+    of >= 0.4, or high containment of the smaller set (a terse title that is
+    essentially a subset of a descriptive one). Thresholds calibrated against a
+    live 3-model run: at these values every cross-model merge inspected was the
+    same issue reworded, while distinct same-file same-class findings stayed
+    separate; tighter values missed real agreement, looser ones began merging
+    unrelated findings.
     """
     if not a or not b:
         return a == b
     inter = len(a & b)
     if inter == 0:
         return False
-    if inter / len(a | b) >= 0.5:
+    if inter / len(a | b) >= 0.4:
         return True
     smaller = a if len(a) <= len(b) else b
-    return len(smaller) >= 2 and inter / len(smaller) >= 0.8
+    return len(smaller) >= 2 and inter / len(smaller) >= 0.7
 
 _PRIORITY_HINTS = (
     "auth", "login", "session", "token", "password", "crypto", "secret",
@@ -327,15 +381,16 @@ class OpenHackEngine:
                model: str, pass_idx: int) -> None:
         """Fold one raw finding into the consolidation map.
 
-        Keyed on file + vulnerability class; within a key, findings whose titles
-        describe the same weakness (`_titles_match`) collapse into one cluster —
+        Keyed on file + canonical vulnerability-class family; within a key,
+        findings whose titles describe the same weakness (`_titles_match`)
+        collapse into one cluster —
         so the same issue worded differently by two model families counts as
         agreement, while genuinely distinct same-class findings stay separate.
         Records the **distinct passes** and models that reported each cluster
         (not raw occurrences), and keeps the strongest severity/confidence seen.
         """
         path = f.get("target_path", "") or ""
-        vclass = (f.get("primary_vulnerability_class") or "unknown").lower()
+        vclass = _canonical_class(f.get("primary_vulnerability_class") or "unknown")
         tokens = _title_tokens(f.get("title", "OpenHack finding"))
         clusters = acc.setdefault((path, vclass), [])
         for cur in clusters:

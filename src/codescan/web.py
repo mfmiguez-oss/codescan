@@ -139,6 +139,8 @@ def sanitized_config(cfg: Config, known_models: list[str] | None = None) -> dict
             "max_tokens": cfg.ai.max_tokens,
             "max_concurrency": cfg.ai.max_concurrency,
             "auto_route": cfg.ai.auto_route,
+            "resolve_deployments": cfg.ai.resolve_deployments,
+            "exploitability_batch": cfg.ai.exploitability_batch,
             "tasks": {
                 name: {
                     "provider": (t.provider or ""),
@@ -194,7 +196,11 @@ def sanitized_config(cfg: Config, known_models: list[str] | None = None) -> dict
             "provider": cfg.source.provider,
             "github_repos": cfg.github.repos,
             "github_orgs": cfg.github.orgs,
+            "dependabot_alerts": cfg.github.dependabot_alerts,
+            "secret_scanning_alerts": cfg.github.secret_scanning_alerts,
         },
+        "sarif": {"paths": cfg.sarif.paths, "repo": cfg.sarif.repo},
+        "sbom": {"paths": cfg.sbom.paths, "repo": cfg.sbom.repo, "osv": cfg.sbom.osv},
         "connectors": {
             "bitbucket": {"base_url": cfg.bitbucket.base_url, "token": _mask(cfg.bitbucket.token)},
             "github": {"api_url": cfg.github.api_url, "token": _mask(cfg.github.token)},
@@ -229,6 +235,10 @@ def apply_config(cfg: Config, update: dict) -> None:
         cfg.ai.max_concurrency = max(1, int(ai["max_concurrency"]))
     if "auto_route" in ai:
         cfg.ai.auto_route = bool(ai["auto_route"])
+    if "resolve_deployments" in ai:
+        cfg.ai.resolve_deployments = bool(ai["resolve_deployments"])
+    if "exploitability_batch" in ai:
+        cfg.ai.exploitability_batch = max(0, int(ai["exploitability_batch"]))
     if "tasks" in ai:
         for name, t in ai["tasks"].items():
             spec = TaskModel(
@@ -302,6 +312,19 @@ def apply_config(cfg: Config, update: dict) -> None:
         cfg.github.repos = [str(r).strip() for r in src["github_repos"] if str(r).strip()]
     if "github_orgs" in src:
         cfg.github.orgs = [str(o).strip() for o in src["github_orgs"] if str(o).strip()]
+    _set_bool(cfg.github, src, "dependabot_alerts")
+    _set_bool(cfg.github, src, "secret_scanning_alerts")
+
+    sarif = update.get("sarif", {})
+    if "paths" in sarif:
+        cfg.sarif.paths = [str(p).strip() for p in sarif["paths"] if str(p).strip()]
+    _set_str(cfg.sarif, sarif, "repo")
+
+    sbom = update.get("sbom", {})
+    if "paths" in sbom:
+        cfg.sbom.paths = [str(p).strip() for p in sbom["paths"] if str(p).strip()]
+    _set_str(cfg.sbom, sbom, "repo")
+    _set_bool(cfg.sbom, sbom, "osv")
 
     sn = update.get("servicenow", {})
     _set_bool(cfg.servicenow, sn, "push")

@@ -28,6 +28,26 @@ def _run(tmp_path):
     )
 
 
+def test_fixtures_mode_ingests_sarif(tmp_path):
+    import json
+
+    fixtures = tmp_path / "fx"
+    fixtures.mkdir()
+    doc = {"runs": [{"tool": {"driver": {"name": "Semgrep", "rules": []}},
+                     "results": [{"ruleId": "r1", "level": "error",
+                                  "message": {"text": "Command injection in runner."}}]}]}
+    (fixtures / "ACME__shop.sarif.json").write_text(json.dumps(doc), encoding="utf-8")
+
+    cfg = Config.load(CONFIG)
+    result = Pipeline(cfg, offline=True, use_ai=False).run(
+        fixtures=fixtures, out_path=tmp_path / "sn.json", state_path=tmp_path / "state.json")
+
+    assert [r.full_name for r in result.repos] == ["ACME/shop"]
+    (f,) = result.findings
+    assert f.source == Source.sarif
+    assert f.title == "Command injection in runner."
+
+
 def test_cross_scanner_dedup(tmp_path):
     result = _run(tmp_path)
     # Log4Shell is reported by both Snyk and Xray -> one finding, both sources.
